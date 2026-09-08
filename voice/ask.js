@@ -68,7 +68,10 @@ function synthesize(text, outWavPath) {
 
 function buildAnswerText(result) {
   if (result.status === 'single') {
-    return `查到了。${result.name}的分機是${result.ext},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
+    const prefix = result.fuzzy
+      ? `我聽起來像是問${result.name},如果沒聽錯,`
+      : '查到了。';
+    return `${prefix}${result.name}的分機是${result.ext},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
   }
   if (result.status === 'multiple') {
     if (result.sameName) {
