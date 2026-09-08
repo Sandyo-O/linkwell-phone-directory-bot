@@ -85,7 +85,9 @@ function parseMerges(xml) {
   }));
 }
 
-const DEPT_SUFFIXES = ['部', '處', '室', '中心', '群', '廳', '組', '樓', '層'];
+const DEPT_SUFFIXES = ['部', '處', '室', '中心', '群', '廳', '組'];
+const GROUP_SUFFIXES = ['事業群', '總處', '集團'];
+const BUILDING_PATTERN = /(大廈|大樓|[一二三四五六七八九十]樓)$/;
 const DEPT_KEYWORDS = ['會議室', '接待', '事業群', '事業部', '事業一部', '事業二部'];
 
 function classify(text) {
@@ -98,6 +100,7 @@ function classify(text) {
   }
   // pure symbols/parens etc treat as note
   if (/^[（(].*[）)]$/.test(t)) return 'note';
+  if (BUILDING_PATTERN.test(t)) return 'building';
   const isDept = DEPT_SUFFIXES.some((s) => t.endsWith(s)) || DEPT_KEYWORDS.some((k) => t.includes(k));
   if (isDept) return 'dept';
   // Chinese name heuristic: mostly CJK chars, length 2-6 (allow spaces / ＊ prefix)
@@ -127,6 +130,15 @@ function extractFile(extractedDir, location) {
 
   const results = [];
   const lastDeptByGroup = {};
+  const lastGroupByGroup = {}; // broader org-unit tier (事業群/總處), see GROUP_SUFFIXES
+  const lastBuildingByGroup = {};
+  // Some department/group names are typed across two consecutive rows in the
+  // same column group with a very short row height so they visually read as
+  // one line (e.g. row32="市場暨產品", row33="行銷事業群"). The first half
+  // classifies as a bare CJK 'name' (no recognizable suffix) and is never
+  // consumed as anyone's actual name, so we hold it here and glue it onto
+  // the next dept/group header we see in that same column group.
+  const pendingFragment = {};
   const rowKeys = Object.keys(rows).map(Number).sort((a, b) => a - b);
 
   for (const rn of rowKeys) {
@@ -144,8 +156,22 @@ function extractFile(extractedDir, location) {
       const e = entries[i];
       if (consumedAsName.has(i)) continue; // already paired to an ext as someone's name; don't reinterpret as a dept header
       const group = Math.floor(e.idx / 3);
+      if (e.kind === 'building') {
+        lastBuildingByGroup[group] = e.val.trim();
+        continue;
+      }
       if (e.kind === 'dept') {
-        lastDeptByGroup[group] = e.val.trim();
+        let val = e.val.trim();
+        if (pendingFragment[group]) {
+          val = pendingFragment[group] + val;
+          delete pendingFragment[group];
+        }
+        if (GROUP_SUFFIXES.some((s) => val.endsWith(s))) {
+          lastGroupByGroup[group] = val;
+        } else {
+          lastDeptByGroup[group] = val;
+        }
+        continue;
       }
       if (e.kind === 'ext') {
         // find next entry (any kind) to the right
@@ -164,15 +190,24 @@ function extractFile(extractedDir, location) {
           if (name) consumedAsName.add(i + 1);
         }
         if (!name) continue; // ext with nothing meaningful next to it, skip
-        let dept = lastDeptByGroup[group] || noteDept || '';
-        if (dept === name) dept = '';
+        const narrowDept = lastDeptByGroup[group] || noteDept || '';
+        const groupTier = lastGroupByGroup[group] || '';
+        let dept = [groupTier, narrowDept].filter((d) => d && d !== name).join(' ');
+        const building = lastBuildingByGroup[group] || '';
         results.push({
-          location,
+          location: building ? `${location}(${building})` : location,
           department: dept,
           name,
           extension: e.val.replace(/[＊*]/g, '').trim(),
           flagged: /[＊*]/.test(e.val) || /[＊*]/.test(name),
         });
+        continue;
+      }
+      // A bare CJK "name"-shaped fragment with no ext next to it never got
+      // consumed above - hold it in case it's the first half of a department
+      // name split across rows (see pendingFragment comment above).
+      if (e.kind === 'name' || e.kind === 'other') {
+        pendingFragment[group] = e.val.trim();
       }
     }
   }
