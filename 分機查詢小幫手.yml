@@ -175,7 +175,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-stage-await
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: await_email
             variable_selector: [conversation, stage]
@@ -218,7 +218,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-email-valid
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: 'true'
             variable_selector: [validate_email, valid]
@@ -236,18 +236,30 @@ workflow:
           from email.header import Header
 
 
+          PLACEHOLDER_VALUES = ('', 'none', '-', 'n/a', 'na', '無', '留空', '(留空)')
+
+
+          def clean(v):
+              v = (v or '').strip()
+              if v.lower() in PLACEHOLDER_VALUES:
+                  return ''
+              return v
+
+
           def main(to_email: str, name: str, ext: str, dept: str, loc: str,
                    smtp_host: str, smtp_port: str, smtp_user: str, smtp_password: str,
                    smtp_from: str, smtp_use_ssl: str) -> dict:
-              host = (smtp_host or '').strip()
+              host = clean(smtp_host)
               if not host:
                   return {'sent': 'false', 'error': 'SMTP_HOST 尚未設定,請到 Dify 環境變數設定內部郵件伺服器'}
               try:
-                  port = int((smtp_port or '587').strip() or '587')
+                  port = int(clean(smtp_port) or '587')
               except ValueError:
                   port = 587
-              from_addr = (smtp_from or smtp_user or '').strip()
-              use_ssl = (smtp_use_ssl or '').strip().lower() == 'true'
+              smtp_user = clean(smtp_user)
+              smtp_password = clean(smtp_password)
+              from_addr = clean(smtp_from) or smtp_user
+              use_ssl = clean(smtp_use_ssl).lower() == 'true'
 
               subject = '凌群電腦分機查詢結果'
               body = (
@@ -266,7 +278,10 @@ workflow:
                       server = smtplib.SMTP_SSL(host, port, timeout=15)
                   else:
                       server = smtplib.SMTP(host, port, timeout=15)
-                      server.starttls()
+                      server.ehlo()
+                      if server.has_extn('STARTTLS'):
+                          server.starttls()
+                          server.ehlo()
                   if smtp_user and smtp_password:
                       server.login(smtp_user, smtp_password)
                   server.sendmail(from_addr, [to_email], msg.as_string())
@@ -313,7 +328,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-sent-true
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: 'true'
             variable_selector: [send_email, sent]
@@ -473,7 +488,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-status-single
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: single
             variable_selector: [lookup, status]
@@ -541,7 +556,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-status-multiple
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: multiple
             variable_selector: [lookup, status]
@@ -558,7 +573,7 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-same-name
-            comparison_operator: '='
+            comparison_operator: 'is'
             varType: string
             value: 'true'
             variable_selector: [lookup, same_name]
