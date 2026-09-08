@@ -1,0 +1,11 @@
+# npm 套件(可用 package-lock.json 重新安裝,不需要進版控)
+voice/node_modules/
+
+# Piper TTS 執行檔、模型、下載的zip(檔案較大,用README裡的指令重新下載即可)
+voice/piper/
+
+# 測試用/產生的語音檔(可用 ask.js 重新產生,不需要進版控)
+voice/*.wav
+
+# Whisper模型快取(如果之後跑在node_modules以外的快取路徑)
+.cache/
