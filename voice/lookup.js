@@ -139,6 +139,7 @@ function lookup(query) {
     loc: first.loc,
     summary: summaryLines.join('\n'),
     count: matches.length,
+    matches: matches.slice(0, 10),
   };
 }
 

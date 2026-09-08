@@ -66,18 +66,55 @@ function synthesize(text, outWavPath) {
   });
 }
 
+// Group candidates by extension first - a shared assistant/secretary often
+// covers several departments on one phone line, so listing the same
+// extension over and over is redundant. Distinct extensions still get
+// listed one by one (those are genuinely different lines/people).
+function groupByExtension(matches) {
+  const order = [];
+  const groups = new Map();
+  for (const m of matches) {
+    if (!groups.has(m.ext)) {
+      groups.set(m.ext, []);
+      order.push(m.ext);
+    }
+    groups.get(m.ext).push(m);
+  }
+  return order.map((ext) => ({ ext, items: groups.get(ext) }));
+}
+
+function speakCandidateList(matches) {
+  const groups = groupByExtension(matches);
+  return groups
+    .map((g, i) => {
+      const name = g.items[0].name;
+      if (g.items.length === 1) {
+        return `第${i + 1}位,${g.items[0].dept || '未標示部門'}的${name},分機${g.ext}`;
+      }
+      const depts = g.items.map((m) => m.dept || '未標示部門').join('、');
+      return `第${i + 1}位,${name}的分機是${g.ext},同時支援:${depts}等${g.items.length}個部門`;
+    })
+    .join('。');
+}
+
 function buildAnswerText(result) {
+  const fuzzyNote = result.fuzzy ? '(這是用發音猜的,如果沒聽錯的話)' : '';
   if (result.status === 'single') {
-    const prefix = result.fuzzy
-      ? `我聽起來像是問${result.name},如果沒聽錯,`
-      : '查到了。';
+    const prefix = result.fuzzy ? `我聽起來像是問${result.name},如果沒聽錯,` : '查到了。';
     return `${prefix}${result.name}的分機是${result.ext},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
   }
   if (result.status === 'multiple') {
-    if (result.sameName) {
-      return `查到${result.count}位同名同姓的${result.name},分屬不同部門。第一位是${result.dept || '未標示部門'}的${result.name},分機${result.ext}。請說出部門名稱來確認是哪一位。`;
+    const groups = groupByExtension(result.matches);
+    if (groups.length === 1) {
+      const g = groups[0];
+      const depts = g.items.map((m) => m.dept || '未標示部門').join('、');
+      const who = result.sameName ? result.name : g.items[0].name;
+      return `${who}${fuzzyNote}的分機是${g.ext},同時支援:${depts}等${g.items.length}個部門。`;
     }
-    return `找到${result.count}筆符合的同仁,請說出更完整的姓名。`;
+    if (result.sameName) {
+      return `查到${result.count}位同名同姓的${result.name}${fuzzyNote},分屬不同部門:${speakCandidateList(result.matches)}。請說出部門名稱來確認是哪一位。`;
+    }
+    return `找到${result.count}筆符合的同仁:${speakCandidateList(result.matches)}。請說出更完整的姓名。`;
   }
   return '抱歉,查無此人,請確認姓名是否正確。';
 }
