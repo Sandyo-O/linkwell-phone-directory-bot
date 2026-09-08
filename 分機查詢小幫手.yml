@@ -226,95 +226,31 @@ workflow:
       type: custom
       position: {x: 1040, y: 200}
       data:
-        desc: 用公司內部SMTP寄信(需先在「環境變數」設定 SMTP_HOST/PORT/USER/PASSWORD/FROM/USE_SSL,全部走地端,不經第三方雲端服務)
-        title: 寄送Email(內部SMTP)
-        type: code
-        code_language: python3
-        code: |-
-          import smtplib
-          from email.mime.text import MIMEText
-          from email.header import Header
-
-
-          PLACEHOLDER_VALUES = ('', 'none', '-', 'n/a', 'na', '無', '留空', '(留空)')
-
-
-          def clean(v):
-              v = (v or '').strip()
-              if v.lower() in PLACEHOLDER_VALUES:
-                  return ''
-              return v
-
-
-          def main(to_email: str, name: str, ext: str, dept: str, loc: str,
-                   smtp_host: str, smtp_port: str, smtp_user: str, smtp_password: str,
-                   smtp_from: str, smtp_use_ssl: str) -> dict:
-              host = clean(smtp_host)
-              if not host:
-                  return {'sent': 'false', 'error': 'SMTP_HOST 尚未設定,請到 Dify 環境變數設定內部郵件伺服器'}
-              try:
-                  port = int(clean(smtp_port) or '587')
-              except ValueError:
-                  port = 587
-              smtp_user = clean(smtp_user)
-              smtp_password = clean(smtp_password)
-              from_addr = clean(smtp_from) or smtp_user
-              use_ssl = clean(smtp_use_ssl).lower() == 'true'
-
-              subject = '凌群電腦分機查詢結果'
-              body = (
-                  f"您好,您查詢的同仁 {name} 分機為:{ext}\n"
-                  f"部門:{dept}\n"
-                  f"地區:{loc}\n\n"
-                  f"(此信由凌群電腦分機查詢小幫手自動寄送)"
-              )
-              msg = MIMEText(body, 'plain', 'utf-8')
-              msg['Subject'] = Header(subject, 'utf-8')
-              msg['From'] = from_addr
-              msg['To'] = to_email
-
-              try:
-                  if use_ssl:
-                      server = smtplib.SMTP_SSL(host, port, timeout=15)
-                  else:
-                      server = smtplib.SMTP(host, port, timeout=15)
-                      server.ehlo()
-                      if server.has_extn('STARTTLS'):
-                          server.starttls()
-                          server.ehlo()
-                  if smtp_user and smtp_password:
-                      server.login(smtp_user, smtp_password)
-                  server.sendmail(from_addr, [to_email], msg.as_string())
-                  server.quit()
-                  return {'sent': 'true', 'error': ''}
-              except Exception as e:
-                  return {'sent': 'false', 'error': str(e)}
-        variables:
-        - variable: to_email
-          value_selector: [validate_email, email]
-        - variable: name
-          value_selector: [conversation, pending_name]
-        - variable: ext
-          value_selector: [conversation, pending_ext]
-        - variable: dept
-          value_selector: [conversation, pending_dept]
-        - variable: loc
-          value_selector: [conversation, pending_loc]
-        - variable: smtp_host
-          value_selector: [env, SMTP_HOST]
-        - variable: smtp_port
-          value_selector: [env, SMTP_PORT]
-        - variable: smtp_user
-          value_selector: [env, SMTP_USER]
-        - variable: smtp_password
-          value_selector: [env, SMTP_PASSWORD]
-        - variable: smtp_from
-          value_selector: [env, SMTP_FROM]
-        - variable: smtp_use_ssl
-          value_selector: [env, SMTP_USE_SSL]
-        outputs:
-          sent: {type: string, children: null}
-          error: {type: string, children: null}
+        desc: 呼叫Resend API寄信(需先在「環境變數」設定 RESEND_API_KEY)。這條路徑會經過Dify api服務本身對外的網路,不受sandbox隔離限制,所以能真正寄到外部信箱,但也代表資料會經過Resend這個第三方雲端服務,不是全地端方案。
+        title: 寄送Email(Resend,雲端測試用)
+        type: http-request
+        method: POST
+        url: https://api.resend.com/emails
+        authorization: {type: no-auth}
+        headers: |-
+          Content-Type: application/json
+          Authorization: Bearer {{#env.RESEND_API_KEY#}}
+        params: ''
+        body:
+          type: json
+          data: |-
+            {
+              "from": "onboarding@resend.dev",
+              "to": ["{{#validate_email.email#}}"],
+              "subject": "凌群電腦分機查詢結果",
+              "html": "<p>您好,您查詢的同仁 <b>{{#conversation.pending_name#}}</b> 分機為:<b>{{#conversation.pending_ext#}}</b></p><p>部門:{{#conversation.pending_dept#}}</p><p>地區:{{#conversation.pending_loc#}}</p>"
+            }
+        timeout: {connect: 10, read: 30, write: 30}
+        retry_config:
+          enabled: false
+          max_retries: 1
+          retry_interval: 1000
+          exponential_backoff: {enabled: false, multiplier: 2, max_interval: 10000}
     - id: if_sent
       type: custom
       position: {x: 1300, y: 200}
@@ -328,10 +264,10 @@ workflow:
           logical_operator: and
           conditions:
           - id: cond-sent-true
-            comparison_operator: 'is'
-            varType: string
-            value: 'true'
-            variable_selector: [send_email, sent]
+            comparison_operator: '='
+            varType: number
+            value: '200'
+            variable_selector: [send_email, status_code]
     - id: answer_sent
       type: custom
       position: {x: 1560, y: 140}
@@ -353,9 +289,9 @@ workflow:
         type: answer
         variables: []
         answer: |-
-          抱歉,信件寄送失敗了(系統訊息:{{#send_email.error#}})。
+          抱歉,信件寄送失敗了(狀態碼:{{#send_email.status_code#}},回應內容:{{#send_email.body#}})。
 
-          這通常是內部郵件伺服器設定或網路連線的問題,請聯絡IT協助檢查,不是你操作有誤。
+          常見原因是Resend API Key沒設定或設錯、或收件信箱不是你註冊Resend時用的信箱(免費方案的限制),請檢查「環境變數」裡的 RESEND_API_KEY。
 
           還想再查其他同仁的分機嗎?直接輸入姓名即可。
     - id: reset_state
