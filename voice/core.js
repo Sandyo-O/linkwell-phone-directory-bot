@@ -83,16 +83,30 @@ function groupByExtension(matches) {
   return order.map((ext) => ({ ext, items: groups.get(ext) }));
 }
 
+// Piper (like most Chinese TTS) reads a bare digit string as one big number
+// ("2037" -> 二千零三十七), which is exactly wrong for a phone extension -
+// people read extensions digit by digit ("二 零 三 七"). Spelling each digit
+// out as its own character sidesteps the number-grouping entirely, since
+// Chinese TTS naturally reads each hanzi as one syllable.
+const CHINESE_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+function spellDigits(numStr) {
+  return String(numStr)
+    .split('')
+    .map((ch) => (ch >= '0' && ch <= '9' ? CHINESE_DIGITS[Number(ch)] : ch))
+    .join('');
+}
+
 function speakCandidateList(matches) {
   const groups = groupByExtension(matches);
   return groups
     .map((g, i) => {
       const name = g.items[0].name;
+      const spokenExt = spellDigits(g.ext);
       if (g.items.length === 1) {
-        return `第${i + 1}位,${g.items[0].dept || '未標示部門'}的${name},分機${g.ext}`;
+        return `第${i + 1}位,${g.items[0].dept || '未標示部門'}的${name},分機${spokenExt}`;
       }
       const depts = g.items.map((m) => m.dept || '未標示部門').join('、');
-      return `第${i + 1}位,${name}的分機是${g.ext},同時支援:${depts}等${g.items.length}個部門`;
+      return `第${i + 1}位,${name}的分機是${spokenExt},同時支援:${depts}等${g.items.length}個部門`;
     })
     .join('。');
 }
@@ -101,7 +115,7 @@ function buildAnswerText(result) {
   const fuzzyNote = result.fuzzy ? '(這是用發音猜的,如果沒聽錯的話)' : '';
   if (result.status === 'single') {
     const prefix = result.fuzzy ? `我聽起來像是問${result.name},如果沒聽錯,` : '查到了。';
-    return `${prefix}${result.name}的分機是${result.ext},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
+    return `${prefix}${result.name}的分機是${spellDigits(result.ext)},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
   }
   if (result.status === 'multiple') {
     const groups = groupByExtension(result.matches);
@@ -109,7 +123,7 @@ function buildAnswerText(result) {
       const g = groups[0];
       const depts = g.items.map((m) => m.dept || '未標示部門').join('、');
       const who = result.sameName ? result.name : g.items[0].name;
-      return `${who}${fuzzyNote}的分機是${g.ext},同時支援:${depts}等${g.items.length}個部門。`;
+      return `${who}${fuzzyNote}的分機是${spellDigits(g.ext)},同時支援:${depts}等${g.items.length}個部門。`;
     }
     if (result.sameName) {
       return `查到${result.count}位同名同姓的${result.name}${fuzzyNote},分屬不同部門:${speakCandidateList(result.matches)}。請說出部門名稱來確認是哪一位。`;
