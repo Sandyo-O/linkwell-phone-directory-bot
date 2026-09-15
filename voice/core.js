@@ -184,6 +184,7 @@ module.exports = {
   loadAudioAsFloat32,
   synthesize,
   buildAnswerText,
+  toSpokenText,
   loadWhisperModel,
   answerFromAudioFile,
 };

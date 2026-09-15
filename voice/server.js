@@ -2,103 +2,52 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
-const { loadWhisperModel, answerFromAudioFile } = require('./core');
+const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, buildAnswerText, s2t } = require('./core');
+const { lookup } = require('./lookup');
 
 const PORT = 3939;
-const HOST = '127.0.0.1'; // loopback only - this is a local test tool for whoever is at this machine
+const HOST = '127.0.0.1'; // loopback only - local test tool for whoever is at this machine
 
-const PAGE = `<!doctype html>
-<html lang="zh-Hant">
-<head>
-<meta charset="utf-8" />
-<title>語音問分機(本機測試)</title>
-<style>
-  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #222; }
-  h1 { font-size: 1.4em; }
-  button { font-size: 1.1em; padding: 16px 32px; border-radius: 999px; border: none; cursor: pointer; }
-  #recBtn { background: #d6336c; color: white; }
-  #recBtn.recording { background: #495057; }
-  #recBtn:disabled { background: #ced4da; cursor: not-allowed; }
-  #status { margin: 16px 0; color: #555; min-height: 1.5em; }
-  .box { background: #f8f9fa; border-radius: 12px; padding: 16px; margin-top: 16px; white-space: pre-wrap; }
-  .label { font-weight: bold; color: #888; font-size: 0.85em; }
-</style>
-</head>
-<body>
-<h1>📞 語音問分機(本機測試工具)</h1>
-<p>按住下面的按鈕說話(例如「請問陳建國的分機是多少」),放開後會自動辨識、查詢、念出答案。全部在這台電腦上運算,沒有送到任何雲端。</p>
-<button id="recBtn">🎙️ 按住說話</button>
-<div id="status"></div>
-<div id="result" class="box" style="display:none">
-  <div><span class="label">聽到的內容:</span> <span id="recognized"></span></div>
-  <div style="margin-top:8px"><span class="label">回覆:</span> <span id="answerText"></span></div>
-  <audio id="answerAudio" controls autoplay style="width:100%; margin-top:12px"></audio>
-</div>
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
 
-<script>
-const btn = document.getElementById('recBtn');
-const statusEl = document.getElementById('status');
-const resultEl = document.getElementById('result');
-let mediaRecorder, chunks = [], stream;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+// MediaRecorder's mime type tells ffmpeg what container to expect; ffmpeg can
+// usually sniff the real format anyway, but a matching extension avoids edge
+// cases with some containers.
+const AUDIO_EXTENSIONS = {
+  'audio/webm': 'webm',
+  'video/webm': 'webm',
+  'audio/mp4': 'mp4',
+  'video/mp4': 'mp4',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+};
 
-async function startRec() {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    statusEl.textContent = '無法取得麥克風權限:' + e.message;
-    return;
-  }
-  chunks = [];
-  mediaRecorder = new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-  mediaRecorder.onstop = onRecordingStop;
-  mediaRecorder.start();
-  btn.classList.add('recording');
-  btn.textContent = '🔴 錄音中...放開送出';
-  statusEl.textContent = '';
+function readBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) {
+        reject(Object.assign(new Error('too large'), { statusCode: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
 }
 
-function stopRec() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-  if (stream) stream.getTracks().forEach((t) => t.stop());
-  btn.classList.remove('recording');
-  btn.textContent = '🎙️ 按住說話';
+function sendJson(res, statusCode, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(body);
 }
-
-async function onRecordingStop() {
-  const blob = new Blob(chunks, { type: 'audio/webm' });
-  if (blob.size < 500) {
-    statusEl.textContent = '錄音太短了,再試一次';
-    return;
-  }
-  btn.disabled = true;
-  statusEl.textContent = '辨識中,請稍候(通常幾秒鐘)...';
-  resultEl.style.display = 'none';
-  try {
-    const res = await fetch('/ask', { method: 'POST', body: blob });
-    if (!res.ok) throw new Error('伺服器錯誤: ' + res.status);
-    const data = await res.json();
-    document.getElementById('recognized').textContent = data.recognized_question;
-    document.getElementById('answerText').textContent = data.answer_text;
-    document.getElementById('answerAudio').src = data.answer_audio_url;
-    resultEl.style.display = 'block';
-    statusEl.textContent = '完成!(辨識耗時 ' + data.stt_ms + 'ms)';
-  } catch (e) {
-    statusEl.textContent = '發生錯誤:' + e.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-btn.addEventListener('mousedown', startRec);
-btn.addEventListener('touchstart', (e) => { e.preventDefault(); startRec(); });
-btn.addEventListener('mouseup', stopRec);
-btn.addEventListener('mouseleave', () => { if (mediaRecorder && mediaRecorder.state === 'recording') stopRec(); });
-btn.addEventListener('touchend', stopRec);
-</script>
-</body>
-</html>`;
 
 async function main() {
   console.log('載入本機Whisper模型(第一次啟動可能要等一下)...');
@@ -106,52 +55,132 @@ async function main() {
   console.log('模型載入完成,啟動伺服器...');
 
   const server = http.createServer(async (req, res) => {
-    if (req.method === 'GET' && req.url === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(PAGE);
-      return;
-    }
+    try {
+      if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(INDEX_HTML);
+        return;
+      }
 
-    if (req.method === 'POST' && req.url === '/ask') {
-      const chunks = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', async () => {
-        const inputPath = path.join(os.tmpdir(), `voice-in-${Date.now()}.webm`);
-        const outputPath = path.join(os.tmpdir(), `voice-out-${Date.now()}.wav`);
-        const debugCopy = path.join(__dirname, 'last-received.webm');
+      if (req.method === 'POST' && req.url === '/audio/transcribe') {
+        const mime = (req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+        const extension = AUDIO_EXTENSIONS[mime] || 'webm';
+        let data;
         try {
-          const buf = Buffer.concat(chunks);
-          fs.writeFileSync(inputPath, buf);
-          fs.writeFileSync(debugCopy, buf); // kept for debugging, overwritten each request
-          console.log(`[/ask] received ${buf.length} bytes`);
-          const result = await answerFromAudioFile(transcriber, inputPath, outputPath);
-          console.log(`[/ask] recognized: "${result.recognized_question}"`);
-          const audioBuf = fs.readFileSync(outputPath);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(
-            JSON.stringify({
-              ...result,
-              answer_audio_url: 'data:audio/wav;base64,' + audioBuf.toString('base64'),
-            })
-          );
+          data = await readBody(req, MAX_AUDIO_BYTES);
+        } catch (e) {
+          sendJson(res, e.statusCode || 400, { detail: '錄音過大,請縮短錄音後重試。' });
+          return;
+        }
+        if (!data.length) {
+          sendJson(res, 400, { detail: '沒有收到錄音,請重新錄製。' });
+          return;
+        }
+        const inputPath = path.join(os.tmpdir(), `voice-in-${Date.now()}.${extension}`);
+        try {
+          fs.writeFileSync(inputPath, data);
+          const audio = await loadAudioAsFloat32(inputPath);
+          const sttResult = await transcriber(audio, { language: 'chinese', task: 'transcribe' });
+          const text = s2t(sttResult.text.trim());
+          if (!text) {
+            sendJson(res, 422, { detail: '未辨識到語音,請靠近麥克風重新錄製。' });
+            return;
+          }
+          sendJson(res, 200, { text });
         } catch (e) {
           console.error(e);
-          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ error: String(e) }));
+          sendJson(res, 502, { detail: '語音辨識失敗,請稍後再試。' });
         } finally {
           fs.rmSync(inputPath, { force: true });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/audio/speech') {
+        let bodyBuf;
+        try {
+          bodyBuf = await readBody(req, 1024 * 1024);
+        } catch (e) {
+          sendJson(res, 413, { detail: '文字過長。' });
+          return;
+        }
+        let payload;
+        try {
+          payload = JSON.parse(bodyBuf.toString('utf8'));
+        } catch (e) {
+          sendJson(res, 400, { detail: '請求格式錯誤。' });
+          return;
+        }
+        const text = (payload.text || '').trim();
+        if (!text) {
+          sendJson(res, 400, { detail: '朗讀文字不可空白。' });
+          return;
+        }
+        if (text.length > 600) {
+          sendJson(res, 400, { detail: '單次朗讀文字過長。' });
+          return;
+        }
+        const outputPath = path.join(os.tmpdir(), `voice-speech-${Date.now()}.wav`);
+        try {
+          synthesize(toSpokenText(text), outputPath);
+          const audioBuf = fs.readFileSync(outputPath);
+          res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+          res.end(audioBuf);
+        } catch (e) {
+          console.error(e);
+          sendJson(res, 502, { detail: '語音合成失敗。' });
+        } finally {
           fs.rmSync(outputPath, { force: true });
         }
-      });
-      return;
-    }
+        return;
+      }
 
-    res.writeHead(404);
-    res.end('not found');
+      if (req.method === 'POST' && req.url === '/chat') {
+        let bodyBuf;
+        try {
+          bodyBuf = await readBody(req, 1024 * 1024);
+        } catch (e) {
+          sendJson(res, 413, { detail: '訊息過長。' });
+          return;
+        }
+        let payload;
+        try {
+          payload = JSON.parse(bodyBuf.toString('utf8'));
+        } catch (e) {
+          sendJson(res, 400, { detail: '請求格式錯誤。' });
+          return;
+        }
+        const message = (payload.message || '').trim();
+        if (!message) {
+          sendJson(res, 400, { detail: '請輸入問題。' });
+          return;
+        }
+        const result = lookup(message);
+        const reply = buildAnswerText(result);
+        sendJson(res, 200, { reply });
+        return;
+      }
+
+      // static assets under /public, if the page ever references any
+      if (req.method === 'GET' && req.url.startsWith('/public/')) {
+        const filePath = path.join(PUBLIC_DIR, req.url.replace('/public/', ''));
+        if (filePath.startsWith(PUBLIC_DIR) && fs.existsSync(filePath)) {
+          res.writeHead(200);
+          fs.createReadStream(filePath).pipe(res);
+          return;
+        }
+      }
+
+      res.writeHead(404);
+      res.end('not found');
+    } catch (e) {
+      console.error(e);
+      sendJson(res, 500, { detail: '伺服器發生錯誤。' });
+    }
   });
 
   server.listen(PORT, HOST, () => {
-    console.log(`\n打開瀏覽器到 http://localhost:${PORT} 開始用麥克風測試\n`);
+    console.log(`\n打開瀏覽器到 http://localhost:${PORT} 開始測試\n`);
   });
 }
 

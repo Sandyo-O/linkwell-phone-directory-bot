@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>凌群電腦分機查詢 AI 助理</title>
+<style>
+  :root {
+    --bg-deep: #060a14;
+    --bg-panel: #0d1526;
+    --bg-panel-2: #111c33;
+    --border-glow: rgba(56, 189, 248, 0.25);
+    --accent-cyan: #22d3ee;
+    --accent-blue: #2563eb;
+    --text-main: #e6edf7;
+    --text-dim: #7f8ba3;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(56, 189, 248, 0.10) 0, transparent 35%),
+      radial-gradient(circle at 85% 10%, rgba(37, 99, 235, 0.12) 0, transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(56, 189, 248, 0.08) 0, transparent 45%),
+      var(--bg-deep);
+    color: var(--text-main);
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 24px;
+    background: linear-gradient(135deg, var(--bg-panel-2), var(--bg-panel));
+    border: 1px solid var(--border-glow);
+    border-radius: 18px;
+    box-shadow: 0 0 24px rgba(34, 211, 238, 0.08);
+    margin-bottom: 16px;
+  }
+
+  header .logo-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+    box-shadow: 0 0 12px var(--accent-cyan);
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+    letter-spacing: 1px;
+    background: linear-gradient(90deg, #ffffff, var(--accent-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  header .subtitle {
+    font-size: 12px;
+    color: var(--text-dim);
+    width: 100%;
+    margin-top: -4px;
+  }
+
+  .chat-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px;
+    background: rgba(13, 21, 38, 0.55);
+    border: 1px solid rgba(56, 189, 248, 0.12);
+    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: var(--text-dim);
+    max-width: 420px;
+  }
+
+  .empty-state .brain {
+    font-size: 40px;
+    margin-bottom: 10px;
+    filter: drop-shadow(0 0 12px var(--accent-cyan));
+  }
+
+  .empty-state .hint {
+    font-size: 12px;
+    margin-top: 8px;
+    color: rgba(127, 139, 163, 0.8);
+  }
+
+  .bubble-row {
+    display: flex;
+    width: 100%;
+  }
+
+  .bubble-row.user { justify-content: flex-end; }
+  .bubble-row.assistant { justify-content: flex-start; }
+
+  .bubble {
+    max-width: 75%;
+    padding: 12px 16px;
+    border-radius: 16px;
+    line-height: 1.6;
+    font-size: 14.5px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .bubble-row.user .bubble {
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+    color: #04121a;
+    border-bottom-right-radius: 4px;
+    box-shadow: 0 0 16px rgba(34, 211, 238, 0.25);
+  }
+
+  .bubble-row.assistant .bubble {
+    background: var(--bg-panel-2);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-bottom-left-radius: 4px;
+    color: var(--text-main);
+  }
+
+  .bubble-row.assistant .bubble.pending {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .bubble-row.assistant .bubble.error {
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #fca5a5;
+  }
+
+  .input-bar {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 8px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border-glow);
+    border-radius: 999px;
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.06);
+  }
+
+  .input-bar input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 15px;
+    padding: 10px 16px;
+  }
+
+  .input-bar input::placeholder { color: var(--text-dim); }
+
+  .input-bar button {
+    border: none;
+    border-radius: 999px;
+    padding: 10px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #04121a;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+
+  .input-bar button:hover:not(:disabled) { filter: brightness(1.1); }
+  .input-bar button:active:not(:disabled) { transform: scale(0.97); }
+  .input-bar button:disabled { opacity: 0.5; cursor: default; }
+
+  .chat-log::-webkit-scrollbar { width: 8px; }
+  .chat-log::-webkit-scrollbar-thumb {
+    background: rgba(56, 189, 248, 0.25);
+    border-radius: 4px;
+  }
+
+  [hidden] { display: none !important; }
+  .response-mode { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .response-mode select, .voice-panel button {
+    background: var(--bg-panel-2); color: var(--text-main);
+    border: 1px solid var(--border-glow); border-radius: 10px; padding: 9px;
+  }
+  button:focus-visible, select:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent-cyan); outline-offset: 3px;
+  }
+  .input-bar .mic-button {
+    display: grid; place-items: center; padding: 10px 14px;
+    background: var(--bg-panel); color: var(--accent-cyan); flex-shrink: 0;
+  }
+  .mic-button svg { width: 22px; height: 22px; }
+  .input-bar .mic-button.recording { background: #7f1d1d; color: #fecaca; }
+  .status { min-height: 22px; margin: 8px 12px 0; font-size: 13px; color: var(--text-dim); }
+  .status.error { color: #fca5a5; }
+  .voice-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 8px 0; font-size: 13px; color: var(--text-dim); }
+  .voice-panel audio { height: 34px; width: 260px; max-width: 100%; }
+  .voice-panel button { cursor: pointer; }
+  .local-badge {
+    font-size: 11px; color: var(--accent-cyan); border: 1px solid var(--border-glow);
+    border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+  }
+  @media (max-width: 600px) {
+    .app { padding: 10px; }
+    header { flex-wrap: wrap; padding: 14px; gap: 10px; }
+    header h1 { font-size: 16px; }
+    .response-mode { width: 100%; justify-content: flex-end; }
+    .chat-log { padding: 12px; }
+    .bubble { max-width: 90%; }
+    .input-bar { gap: 4px; }
+    .input-bar input { padding: 10px; }
+    .input-bar button { padding: 10px 14px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="logo-dot"></span>
+    <h1>凌群電腦分機查詢 AI 助理</h1>
+    <span class="local-badge">🔒 全程本機運算</span>
+    <label class="response-mode" for="responseMode">回答方式
+      <select id="responseMode">
+        <option value="text">文字回答</option>
+        <option value="voice">語音＋文字回答</option>
+      </select>
+    </label>
+    <span class="subtitle">語音辨識(Whisper)、查詢比對、語音合成(Piper)全部在這台電腦上執行,不經任何雲端服務</span>
+  </header>
+
+  <div class="chat-log" id="chatLog">
+    <div class="empty-state" id="emptyState">
+      <div class="brain">📞</div>
+      <div>請輸入或用麥克風說出想查詢的同仁姓名,我會回覆分機、部門與地區。</div>
+      <div class="hint">例如:「請問陳建國的分機是多少」</div>
+    </div>
+  </div>
+
+  <div class="voice-panel" id="voicePanel" hidden>
+    <span>本機語音合成</span>
+    <span id="speechStatus" role="status"></span>
+    <audio id="replyAudio" controls hidden aria-label="回答語音"></audio>
+    <button type="button" id="stopSpeech" hidden>停止朗讀</button>
+  </div>
+  <form class="input-bar" id="chatForm" autocomplete="off">
+    <input type="text" id="messageInput" aria-label="問題" placeholder="輸入同仁姓名,或按麥克風說話..." autocomplete="off" />
+    <button type="button" id="micButton" class="mic-button" aria-label="開始錄音" aria-pressed="false" title="開始錄音">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+    </button>
+    <button type="submit" id="sendButton">送出</button>
+  </form>
+  <p class="status" id="inputStatus" role="status" aria-live="polite">按麥克風開始錄音,再按一次停止;辨識後可修改文字再送出。</p>
+</div>
+
+<script>
+  const chatLog = document.getElementById('chatLog');
+  const emptyState = document.getElementById('emptyState');
+  const chatForm = document.getElementById('chatForm');
+  const messageInput = document.getElementById('messageInput');
+  const sendButton = document.getElementById('sendButton');
+  const micButton = document.getElementById('micButton');
+  const responseMode = document.getElementById('responseMode');
+  const inputStatus = document.getElementById('inputStatus');
+  const voicePanel = document.getElementById('voicePanel');
+  const speechStatus = document.getElementById('speechStatus');
+  const replyAudio = document.getElementById('replyAudio');
+  const stopSpeechButton = document.getElementById('stopSpeech');
+  const history = [];
+  const conversationId = (() => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  })();
+  let chatBusy = false;
+  let recordingState = 'idle';
+  let recorder = null;
+  let recordingStream = null;
+  let recordingTimer = null;
+  let speechController = null;
+  let audioUrl = null;
+  const MAX_RECORDING_BYTES = 20 * 1024 * 1024;
+  const microphoneAvailable = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
+
+  function setInputStatus(text, error = false) {
+    inputStatus.textContent = text;
+    inputStatus.classList.toggle('error', error);
+  }
+
+  function updateControls() {
+    sendButton.disabled = chatBusy || recordingState !== 'idle';
+    messageInput.disabled = recordingState !== 'idle';
+    micButton.disabled = !microphoneAvailable || chatBusy || ['starting', 'transcribing'].includes(recordingState);
+    const recording = recordingState === 'recording';
+    micButton.classList.toggle('recording', recording);
+    micButton.setAttribute('aria-pressed', String(recording));
+    micButton.setAttribute('aria-label', recording ? '停止錄音並辨識' : '開始錄音');
+    micButton.title = recording ? '停止錄音並辨識' : '開始錄音';
+  }
+
+  async function responseError(response) {
+    const data = await response.json().catch(() => ({}));
+    return new Error(typeof data.detail === 'string' ? data.detail : `服務回應錯誤 (${response.status}),請稍後再試。`);
+  }
+
+  function releaseMicrophone() {
+    clearTimeout(recordingTimer);
+    recordingStream?.getTracks().forEach(track => track.stop());
+    recordingStream = null;
+  }
+
+  function stopRecording() {
+    if (recorder?.state === 'recording') {
+      recordingState = 'transcribing';
+      updateControls();
+      recorder.stop();
+      releaseMicrophone();
+    }
+  }
+
+  async function startRecording() {
+    if (chatBusy || recordingState !== 'idle') return;
+    stopSpeech();
+    recordingState = 'starting';
+    updateControls();
+    setInputStatus('正在取得麥克風權限…');
+    try {
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+      if (!mimeType) throw new Error('此瀏覽器不支援所需錄音格式,請改用新版 Chrome、Edge 或 Safari。');
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(recordingStream, { mimeType });
+      const chunks = [];
+      let size = 0;
+      let recordingError = false;
+      recorder.ondataavailable = event => {
+        size += event.data.size;
+        if (size > MAX_RECORDING_BYTES) {
+          recordingError = true;
+          setInputStatus('錄音過大,請縮短錄音後重試。', true);
+          stopRecording();
+        } else if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onerror = () => {
+        recordingError = true;
+        setInputStatus('錄音中斷,請確認麥克風後重新錄製。', true);
+        stopRecording();
+        releaseMicrophone();
+        recordingState = 'idle';
+        updateControls();
+      };
+      recorder.onstop = async () => {
+        releaseMicrophone();
+        recordingState = 'transcribing';
+        updateControls();
+        try {
+          if (recordingError) return;
+          const blob = new Blob(chunks, { type: mimeType });
+          if (!blob.size) throw new Error('沒有錄到聲音,請重新錄製。');
+          setInputStatus('正在辨識語音(本機Whisper)…');
+          const response = await fetch('/audio/transcribe', {
+            method: 'POST', headers: { 'Content-Type': mimeType }, body: blob,
+            signal: AbortSignal.timeout(90000),
+          });
+          if (!response.ok) throw await responseError(response);
+          const data = await response.json();
+          if (!data.text?.trim()) throw new Error('未辨識到語音,請重新錄製。');
+          messageInput.value = [messageInput.value.trim(), data.text.trim()].filter(Boolean).join(' ');
+          setInputStatus('語音已轉成文字,確認或修改後按「送出」。');
+        } catch (error) {
+          setInputStatus(error.name === 'TimeoutError' ? '語音辨識逾時,請重新錄製。' : error.message, true);
+        } finally {
+          recordingState = 'idle';
+          updateControls();
+          messageInput.focus();
+        }
+      };
+      recorder.start(1000);
+      recordingState = 'recording';
+      updateControls();
+      setInputStatus('錄音中…再按麥克風停止(最長 2 分鐘)。');
+      recordingTimer = setTimeout(stopRecording, 120000);
+    } catch (error) {
+      releaseMicrophone();
+      recordingState = 'idle';
+      updateControls();
+      const messages = {
+        NotAllowedError: '未取得麥克風權限,請在瀏覽器允許麥克風後再試。',
+        NotFoundError: '找不到麥克風,請接上麥克風後再試。',
+        NotReadableError: '無法使用麥克風,請確認是否被其他程式占用。',
+      };
+      setInputStatus(messages[error.name] || error.message, true);
+    }
+  }
+
+  function clearAudio() {
+    replyAudio.pause();
+    replyAudio.removeAttribute('src');
+    replyAudio.load();
+    replyAudio.hidden = true;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = null;
+  }
+
+  function stopSpeech() {
+    speechController?.abort();
+    speechController = null;
+    clearAudio();
+    stopSpeechButton.hidden = true;
+    speechStatus.textContent = '';
+  }
+
+  function speechChunks(text) {
+    const chunks = [];
+    let remaining = Array.from(text.trim());
+    while (remaining.length) {
+      let length = Math.min(500, remaining.length);
+      if (remaining.length > length) {
+        for (let i = length - 1; i >= 200; i--) {
+          if (/[。！？.!?;\n]/.test(remaining[i])) { length = i + 1; break; }
+        }
+      }
+      const chunk = remaining.splice(0, length).join('').trim();
+      if (chunk) chunks.push(chunk);
+    }
+    return chunks;
+  }
+
+  function playAudio(blob, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) { reject(new DOMException('Cancelled', 'AbortError')); return; }
+      clearAudio();
+      audioUrl = URL.createObjectURL(blob);
+      replyAudio.src = audioUrl;
+      replyAudio.hidden = false;
+      const cleanup = () => {
+        replyAudio.removeEventListener('ended', ended);
+        replyAudio.removeEventListener('error', failed);
+        signal.removeEventListener('abort', cancelled);
+      };
+      const ended = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error('語音播放失敗,文字回答仍可閱讀。')); };
+      const cancelled = () => { cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
+      replyAudio.addEventListener('ended', ended);
+      replyAudio.addEventListener('error', failed);
+      signal.addEventListener('abort', cancelled, { once: true });
+      replyAudio.play().catch(error => {
+        if (signal.aborted) return;
+        if (error.name === 'NotAllowedError') {
+          speechStatus.textContent = '請按播放器的播放鍵開始朗讀。';
+        } else failed();
+      });
+    });
+  }
+
+  async function speakReply(text) {
+    stopSpeech();
+    if (responseMode.value !== 'voice') return;
+    const controller = new AbortController();
+    speechController = controller;
+    stopSpeechButton.hidden = false;
+    try {
+      const chunks = speechChunks(text);
+      for (let i = 0; i < chunks.length; i++) {
+        if (controller.signal.aborted) return;
+        speechStatus.textContent = `正在產生語音(本機Piper) ${i + 1}/${chunks.length}…`;
+        const response = await fetch('/audio/speech', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chunks[i] }),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90000)]),
+        });
+        if (!response.ok) throw await responseError(response);
+        const blob = await response.blob();
+        if (controller.signal.aborted) return;
+        speechStatus.textContent = `朗讀中 ${i + 1}/${chunks.length}`;
+        await playAudio(blob, controller.signal);
+      }
+      speechStatus.textContent = '朗讀完畢';
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        speechStatus.textContent = error.name === 'TimeoutError' ? '語音產生逾時,文字回答仍可閱讀。' : error.message;
+      }
+    } finally {
+      if (speechController === controller) {
+        speechController = null;
+        stopSpeechButton.hidden = true;
+        clearAudio();
+      }
+    }
+  }
+
+  responseMode.addEventListener('change', () => {
+    stopSpeech();
+    voicePanel.hidden = responseMode.value !== 'voice';
+  });
+  stopSpeechButton.addEventListener('click', stopSpeech);
+  micButton.addEventListener('click', () => recordingState === 'recording' ? stopRecording() : startRecording());
+  window.addEventListener('pagehide', () => {
+    if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; recorder.onerror = null; }
+    stopRecording();
+    releaseMicrophone();
+    recordingState = 'idle';
+    stopSpeech();
+    updateControls();
+  });
+  if (!microphoneAvailable) setInputStatus('麥克風需要 HTTPS 或 localhost,以及支援錄音的新版瀏覽器;仍可打字提問。');
+  updateControls();
+
+  function addBubble(role, text, options = {}) {
+    if (emptyState) emptyState.remove();
+
+    const row = document.createElement('div');
+    row.className = `bubble-row ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    if (options.pending) bubble.classList.add('pending');
+    if (options.error) bubble.classList.add('error');
+    bubble.textContent = text;
+
+    row.appendChild(bubble);
+    chatLog.appendChild(row);
+    chatLog.scrollTop = chatLog.scrollHeight;
+    return bubble;
+  }
+
+  async function sendMessage(message) {
+    addBubble('user', message);
+    history.push({ role: 'user', content: message });
+
+    const pendingBubble = addBubble('assistant', '查詢中...', { pending: true });
+
+    try {
+      const response = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history: history.slice(0, -1), conversation_id: conversationId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`伺服器回應錯誤 (${response.status})`);
+      }
+
+      const data = await response.json();
+      pendingBubble.classList.remove('pending');
+      pendingBubble.textContent = data.reply;
+      history.push({ role: 'assistant', content: data.reply });
+      chatLog.scrollTop = chatLog.scrollHeight;
+      if (responseMode.value === 'voice' && recordingState === 'idle') void speakReply(data.reply);
+    } catch (err) {
+      pendingBubble.classList.remove('pending');
+      pendingBubble.classList.add('error');
+      pendingBubble.textContent = '發生錯誤,無法取得回覆,請稍後再試。';
+    }
+  }
+
+  chatForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const message = messageInput.value.trim();
+    if (!message || chatBusy || recordingState !== 'idle') return;
+    stopSpeech();
+    messageInput.value = '';
+    chatBusy = true;
+    updateControls();
+    sendMessage(message).finally(() => {
+      chatBusy = false;
+      updateControls();
+      messageInput.focus();
+    });
+  });
+
+  messageInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault();
+      chatForm.requestSubmit();
+    }
+  });
+</script>
+</body>
+</html>
