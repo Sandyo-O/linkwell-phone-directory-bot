@@ -15,14 +15,28 @@ function indent(text, spaces) {
 const validateEmailCode = `import re
 
 
-def main(query: str) -> dict:
-    email = (query or '').strip()
-    pattern = r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
-    valid = bool(re.match(pattern, email))
-    return {
-        'email': email,
-        'valid': 'true' if valid else 'false',
-    }
+DECLINE_WORDS = ['不用', '不寄', '不需要', '算了', '不要', '取消', 'no', '不用了']
+CONFIRM_WORDS = ['要', '好', '是', '對', 'ok', 'yes', '寄', '麻煩', '可以', '嗯']
+
+
+def main(query: str, default_email: str) -> dict:
+    text = (query or '').strip()
+    lowered = text.lower()
+
+    email_match = re.search(r'[^@\\s]+@[^@\\s]+\\.[^@\\s]+', text)
+    if email_match:
+        return {'decision': 'email', 'email': email_match.group(0)}
+
+    if any(w in text or w in lowered for w in DECLINE_WORDS):
+        return {'decision': 'decline', 'email': ''}
+
+    if any(w in text or w in lowered for w in CONFIRM_WORDS):
+        fallback = (default_email or '').strip()
+        if fallback:
+            return {'decision': 'email', 'email': fallback}
+        return {'decision': 'need_email', 'email': ''}
+
+    return {'decision': 'unclear', 'email': ''}
 `;
 
 const sendEmailCode = `import smtplib
@@ -227,18 +241,43 @@ workflow:
       sourceHandle: 'false'
       target: lookup
       targetHandle: target
-    - id: validate_email-if_valid_email
+    - id: validate_email-if_decline
       source: validate_email
       sourceHandle: source
-      target: if_valid_email
+      target: if_decline
       targetHandle: target
-    - id: if_valid_email-true-send_email
-      source: if_valid_email
+    - id: if_decline-true-answer_declined
+      source: if_decline
+      sourceHandle: 'true'
+      target: answer_declined
+      targetHandle: target
+    - id: answer_declined-reset_state
+      source: answer_declined
+      sourceHandle: source
+      target: reset_state
+      targetHandle: target
+    - id: if_decline-false-if_is_email
+      source: if_decline
+      sourceHandle: 'false'
+      target: if_is_email
+      targetHandle: target
+    - id: if_is_email-true-send_email
+      source: if_is_email
       sourceHandle: 'true'
       target: send_email
       targetHandle: target
-    - id: if_valid_email-false-answer_invalid_email
-      source: if_valid_email
+    - id: if_is_email-false-if_need_email
+      source: if_is_email
+      sourceHandle: 'false'
+      target: if_need_email
+      targetHandle: target
+    - id: if_need_email-true-answer_need_email
+      source: if_need_email
+      sourceHandle: 'true'
+      target: answer_need_email
+      targetHandle: target
+    - id: if_need_email-false-answer_invalid_email
+      source: if_need_email
       sourceHandle: 'false'
       target: answer_invalid_email
       targetHandle: target
@@ -311,7 +350,17 @@ workflow:
     - id: start
       type: custom
       position: {x: 0, y: 400}
-      data: {desc: '', title: Start, type: start, variables: []}
+      data:
+        desc: ''
+        title: Start
+        type: start
+        variables:
+        - variable: default_email
+          label: 預設Email(選填,回答「要」但沒給email時會用這個)
+          type: text-input
+          required: false
+          max_length: 256
+          default: ''
     - id: if_stage
       type: custom
       position: {x: 260, y: 400}
@@ -333,34 +382,91 @@ workflow:
       type: custom
       position: {x: 520, y: 300}
       data:
-        desc: 檢查使用者輸入的是不是合法email格式
-        title: 驗證Email格式
+        desc: 判斷這句回覆是「不用寄」、「給了email」、還是「說要寄但沒給email(這時用預設email)」
+        title: 判讀Email回覆
         type: code
         code_language: python3
 ${yamlBlockScalar('code', validateEmailCode, 8)}
         variables:
         - variable: query
           value_selector: [sys, query]
+        - variable: default_email
+          value_selector: [start, default_email]
         outputs:
+          decision: {type: string, children: null}
           email: {type: string, children: null}
-          valid: {type: string, children: null}
-    - id: if_valid_email
+    - id: if_decline
       type: custom
-      position: {x: 780, y: 300}
+      position: {x: 780, y: 200}
       data:
         desc: ''
-        title: Email格式正確嗎?
+        title: 使用者說不用寄嗎?
         type: if-else
         cases:
         - case_id: 'true'
           id: 'true'
           logical_operator: and
           conditions:
-          - id: cond-email-valid
+          - id: cond-decision-decline
             comparison_operator: 'is'
             varType: string
-            value: 'true'
-            variable_selector: [validate_email, valid]
+            value: decline
+            variable_selector: [validate_email, decision]
+    - id: if_is_email
+      type: custom
+      position: {x: 780, y: 340}
+      data:
+        desc: ''
+        title: 有email可以寄了嗎?
+        type: if-else
+        cases:
+        - case_id: 'true'
+          id: 'true'
+          logical_operator: and
+          conditions:
+          - id: cond-decision-email
+            comparison_operator: 'is'
+            varType: string
+            value: email
+            variable_selector: [validate_email, decision]
+    - id: if_need_email
+      type: custom
+      position: {x: 780, y: 480}
+      data:
+        desc: ''
+        title: 是說要寄、只是還沒給email嗎?
+        type: if-else
+        cases:
+        - case_id: 'true'
+          id: 'true'
+          logical_operator: and
+          conditions:
+          - id: cond-decision-need-email
+            comparison_operator: 'is'
+            varType: string
+            value: need_email
+            variable_selector: [validate_email, decision]
+    - id: answer_declined
+      type: custom
+      position: {x: 1040, y: 100}
+      data:
+        desc: ''
+        title: 回覆不寄送
+        type: answer
+        variables: []
+        answer: |-
+          好的,那這次就不寄email了。
+
+          還想查其他同仁的分機嗎?直接輸入姓名即可。
+    - id: answer_need_email
+      type: custom
+      position: {x: 1040, y: 600}
+      data:
+        desc: ''
+        title: 回覆請提供Email
+        type: answer
+        variables: []
+        answer: 好的,請問您的email地址是?
     - id: send_email
       type: custom
       position: {x: 1040, y: 200}
@@ -465,7 +571,7 @@ ${yamlBlockScalar('code', validateEmailCode, 8)}
         title: 回覆Email格式錯誤
         type: answer
         variables: []
-        answer: 這個看起來不是有效的email格式,請重新輸入你的email地址(例如:name@example.com)。
+        answer: 不好意思,沒有聽懂。要寄的話請輸入您的email地址(例如:name@example.com),不寄的話請回覆「不用」。
     - id: lookup
       type: custom
       position: {x: 520, y: 560}
@@ -554,7 +660,7 @@ ${yamlBlockScalar('code', lookupCode, 8)}
           部門:{{#lookup.dept#}}
           地區:{{#lookup.loc#}}
 
-          請問要把這個分機寄到你的email嗎?請直接輸入你的email地址。
+          請問要把這個分機寄到您的email嗎?要的話請回覆「要」或直接輸入您的email地址,不用的話請回覆「不用」。
     - id: if_multiple
       type: custom
       position: {x: 1040, y: 820}

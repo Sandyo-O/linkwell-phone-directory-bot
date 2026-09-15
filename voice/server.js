@@ -39,7 +39,7 @@ if (!DIFY_API_KEY) {
 // email") stay in the same conversation.
 const difyConversations = new Map();
 
-async function askDify(message, browserConversationId) {
+async function askDify(message, browserConversationId, defaultEmail) {
   const difyConversationId = difyConversations.get(browserConversationId) || '';
   const response = await fetch(`${DIFY_API_BASE}/chat-messages`, {
     method: 'POST',
@@ -48,7 +48,10 @@ async function askDify(message, browserConversationId) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      inputs: {},
+      // default_email only actually gets used by the workflow when the user
+      // says "yes, send it" without including an address - harmless to send
+      // on every turn.
+      inputs: { default_email: defaultEmail || '' },
       query: message,
       response_mode: 'blocking',
       conversation_id: difyConversationId,
@@ -215,6 +218,7 @@ async function main() {
         }
         const message = (payload.message || '').trim();
         const conversationId = (payload.conversation_id || '').trim();
+        const defaultEmail = (payload.default_email || '').trim();
         if (!message) {
           sendJson(res, 400, { detail: '請輸入問題。' });
           return;
@@ -224,7 +228,7 @@ async function main() {
           return;
         }
         try {
-          const reply = await askDify(message, conversationId);
+          const reply = await askDify(message, conversationId, defaultEmail);
           sendJson(res, 200, { reply });
         } catch (e) {
           console.error(e);

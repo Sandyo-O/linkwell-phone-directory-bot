@@ -624,7 +624,7 @@
     return bubble;
   }
 
-  async function sendMessage(message, options = {}) {
+  async function sendMessage(message) {
     addBubble('user', message);
     history.push({ role: 'user', content: message });
 
@@ -634,7 +634,15 @@
       const response = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history: history.slice(0, -1), conversation_id: conversationId }),
+        body: JSON.stringify({
+          message,
+          history: history.slice(0, -1),
+          conversation_id: conversationId,
+          // Dify only actually uses this when the user confirms sending but
+          // doesn't include an address in the same reply - it decides the
+          // yes/no/email logic itself, the page just carries this along.
+          default_email: emailInput.value.trim(),
+        }),
       });
 
       if (!response.ok) {
@@ -647,25 +655,6 @@
       history.push({ role: 'assistant', content: data.reply });
       chatLog.scrollTop = chatLog.scrollHeight;
       if (responseMode.value === 'voice' && recordingState === 'idle') void speakReply(data.reply);
-
-      // If the assistant is asking for an email address and we have a remembered
-      // one saved, answer it automatically - don't make the user retype/re-say
-      // their own email every single time. Only one auto-reply per question
-      // (options.auto) so a remembered address Dify keeps rejecting can't loop.
-      if (!options.auto) {
-        const rememberedEmail = emailInput.value.trim();
-        if (/email|信箱/i.test(data.reply) && EMAIL_PATTERN.test(rememberedEmail)) {
-          setTimeout(() => {
-            chatBusy = true;
-            updateControls();
-            sendMessage(rememberedEmail, { auto: true }).finally(() => {
-              chatBusy = false;
-              updateControls();
-              messageInput.focus();
-            });
-          }, 600);
-        }
-      }
     } catch (err) {
       pendingBubble.classList.remove('pending');
       pendingBubble.classList.add('error');
