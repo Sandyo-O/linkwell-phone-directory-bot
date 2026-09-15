@@ -2,7 +2,24 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const QRCode = require('qrcode');
 const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, s2t } = require('./core');
+
+// Pick the machine's own LAN-facing IPv4 address, so people on other devices
+// on the same office network can scan a QR code to reach this tool. Windows
+// also reports Docker/Hyper-V/WSL virtual switches as non-internal interfaces -
+// skip those, since other devices on the real network can't reach them.
+const VIRTUAL_IFACE_PATTERN = /vEthernet|Virtual|Loopback|Default Switch|docker|WSL/i;
+function findLanIp() {
+  const interfaces = Object.entries(os.networkInterfaces());
+  const real = interfaces.filter(([name]) => !VIRTUAL_IFACE_PATTERN.test(name));
+  for (const [, iface] of [...real, ...interfaces]) {
+    for (const addr of iface || []) {
+      if (addr.family === 'IPv4' && !addr.internal) return addr.address;
+    }
+  }
+  return null;
+}
 
 // Minimal .env loader (no dotenv dependency) - just DIFY_API_KEY/DIFY_API_BASE.
 for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
@@ -50,7 +67,9 @@ async function askDify(message, browserConversationId) {
 }
 
 const PORT = 3939;
-const HOST = '127.0.0.1'; // loopback only - local test tool for whoever is at this machine
+const HOST = '0.0.0.0'; // bind all interfaces - approved for use over the office LAN (QR-code kiosk access)
+const LAN_IP = findLanIp();
+const LAN_URL = LAN_IP ? `http://${LAN_IP}:${PORT}` : null;
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
@@ -214,6 +233,29 @@ async function main() {
         return;
       }
 
+      if (req.method === 'GET' && req.url === '/lan-url') {
+        sendJson(res, 200, { url: LAN_URL });
+        return;
+      }
+
+      if (req.method === 'GET' && req.url.split('?')[0] === '/qrcode.png') {
+        if (!LAN_URL) {
+          res.writeHead(404);
+          res.end('找不到區網IP');
+          return;
+        }
+        try {
+          const pngBuf = await QRCode.toBuffer(LAN_URL, { width: 320, margin: 2 });
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+          res.end(pngBuf);
+        } catch (e) {
+          console.error(e);
+          res.writeHead(500);
+          res.end('QR code產生失敗');
+        }
+        return;
+      }
+
       // static assets under /public, if the page ever references any
       if (req.method === 'GET' && req.url.startsWith('/public/')) {
         const filePath = path.join(PUBLIC_DIR, req.url.replace('/public/', ''));
@@ -233,7 +275,8 @@ async function main() {
   });
 
   server.listen(PORT, HOST, () => {
-    console.log(`\n打開瀏覽器到 http://localhost:${PORT} 開始測試\n`);
+    console.log(`\n打開瀏覽器到 http://localhost:${PORT} 開始測試`);
+    console.log(LAN_URL ? `區網其他裝置可連到 ${LAN_URL}(或掃描頁面上的QR code)\n` : '找不到區網IP,其他裝置可能無法連線\n');
   });
 }
 
