@@ -104,6 +104,15 @@ const lookupCode = `import re
 DATA = ${dataJson}
 
 
+def split_loc(loc):
+    # loc is stored as "城市(建築物)" or just "城市" - split it back apart so
+    # the answer can show them as two separate lines.
+    m = re.match(r'^(.*?)\\((.*)\\)$', loc or '')
+    if m:
+        return m.group(1), m.group(2)
+    return (loc or ''), ''
+
+
 def main(query: str) -> dict:
     q = (query or '').strip()
     q_nospace = q.replace(' ', '').replace('\\u3000', '')
@@ -142,6 +151,7 @@ def main(query: str) -> dict:
         summary_lines.append(f"{i}. {m['name']} - 部門:{dept} / 地區:{loc} / 分機:{m['ext']}")
     if len(matches) > 10:
         summary_lines.append(f"...還有 {len(matches) - 10} 筆未列出,請輸入更精確的姓名或部門縮小範圍")
+    loc_city, loc_building = split_loc(first['loc'])
     return {
         'status': status,
         'same_name': 'true' if same_name else 'false',
@@ -149,6 +159,8 @@ def main(query: str) -> dict:
         'ext': first['ext'],
         'dept': first['dept'],
         'loc': first['loc'],
+        'loc_city': loc_city,
+        'loc_building_line': f'地點:{loc_building}\\n' if loc_building else '',
         'summary': '\\n'.join(summary_lines),
         'count': len(matches),
     }
@@ -601,6 +613,8 @@ ${yamlBlockScalar('code', lookupCode, 8)}
           ext: {type: string, children: null}
           dept: {type: string, children: null}
           loc: {type: string, children: null}
+          loc_city: {type: string, children: null}
+          loc_building_line: {type: string, children: null}
           summary: {type: string, children: null}
           count: {type: number, children: null}
     - id: if_found
@@ -663,12 +677,12 @@ ${yamlBlockScalar('code', lookupCode, 8)}
         type: answer
         variables: []
         answer: |-
-          查到了!
+          以下是「{{#lookup.name#}}」的員工資訊:
 
           姓名:{{#lookup.name#}}
           分機:{{#lookup.ext#}}
-          部門:{{#lookup.dept#}}
-          地區:{{#lookup.loc#}}
+          地區:{{#lookup.loc_city#}}
+          {{#lookup.loc_building_line#}}部門:{{#lookup.dept#}}
 
           請問要把這個分機寄到您的email嗎?要的話請回覆「要」或直接輸入您的email地址,不用的話請回覆「不用」。
     - id: if_multiple
