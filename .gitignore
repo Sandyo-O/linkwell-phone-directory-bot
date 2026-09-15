@@ -6,6 +6,7 @@ voice/piper/
 
 # 測試用/產生的語音檔(可用 ask.js 重新產生,不需要進版控)
 voice/*.wav
+voice/last-received.webm
 
 # Whisper模型快取(如果之後跑在node_modules以外的快取路徑)
 .cache/
