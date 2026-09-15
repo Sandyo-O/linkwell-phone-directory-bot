@@ -4,6 +4,24 @@ const os = require('os');
 const path = require('path');
 const QRCode = require('qrcode');
 const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, s2t } = require('./core');
+const { lookup } = require('./lookup');
+
+// Dify's own lookup only does exact substring matching on the name - it
+// doesn't have the pinyin fuzzy-matching data/logic this project already
+// built for voice input (Whisper mis-hearing a rare character but getting
+// the sound roughly right, e.g. "史印辰" heard as "是硬沉"), and porting the
+// whole pinyin dataset into Dify's restricted Python sandbox isn't practical.
+// So: run the query through the local fuzzy matcher first: only when the
+// exact match finds nothing AND the fuzzy match confidently lands on exactly
+// one person, swap the query for that person's real name before asking Dify
+// - otherwise (already an exact match, no match at all, or an ambiguous
+// fuzzy match) pass the message through unchanged, so this never interferes
+// with non-name replies like "要"/"不用"/an email address.
+function correctMishearName(message) {
+  const result = lookup(message);
+  if (result.fuzzy && result.status === 'single') return result.name;
+  return message;
+}
 
 // Pick the machine's own LAN-facing IPv4 address, so people on other devices
 // on the same office network can scan a QR code to reach this tool. Windows
@@ -228,7 +246,8 @@ async function main() {
           return;
         }
         try {
-          const reply = await askDify(message, conversationId, defaultEmail);
+          const correctedMessage = correctMishearName(message);
+          const reply = await askDify(correctedMessage, conversationId, defaultEmail);
           sendJson(res, 200, { reply });
         } catch (e) {
           console.error(e);
