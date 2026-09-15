@@ -443,23 +443,18 @@ ${yamlBlockScalar('code', validateEmailCode, 8)}
         version: '2'
         items:
         - variable_selector: [conversation, stage]
-          input_type: constant
           operation: clear
           write_mode: clear
         - variable_selector: [conversation, pending_name]
-          input_type: constant
           operation: clear
           write_mode: clear
         - variable_selector: [conversation, pending_ext]
-          input_type: constant
           operation: clear
           write_mode: clear
         - variable_selector: [conversation, pending_dept]
-          input_type: constant
           operation: clear
           write_mode: clear
         - variable_selector: [conversation, pending_loc]
-          input_type: constant
           operation: clear
           write_mode: clear
     - id: answer_invalid_email

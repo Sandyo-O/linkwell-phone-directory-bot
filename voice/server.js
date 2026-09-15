@@ -2,8 +2,52 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, buildAnswerText, s2t } = require('./core');
-const { lookup } = require('./lookup');
+const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, s2t } = require('./core');
+
+// Minimal .env loader (no dotenv dependency) - just DIFY_API_KEY/DIFY_API_BASE.
+for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+  const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+  if (match && !(match[1] in process.env)) process.env[match[1]] = match[2];
+}
+
+const DIFY_API_KEY = process.env.DIFY_API_KEY;
+const DIFY_API_BASE = process.env.DIFY_API_BASE || 'http://localhost/v1';
+if (!DIFY_API_KEY) {
+  throw new Error('voice/.env 裡沒有設定 DIFY_API_KEY,請先取得Dify app的API金鑰。');
+}
+
+// Dify owns the conversation memory (pending lookup, email step, etc). The browser
+// tab generates its own random id per page load; we just need to remember which
+// real Dify conversation_id that maps to so multi-turn replies (e.g. "寄到我的
+// email") stay in the same conversation.
+const difyConversations = new Map();
+
+async function askDify(message, browserConversationId) {
+  const difyConversationId = difyConversations.get(browserConversationId) || '';
+  const response = await fetch(`${DIFY_API_BASE}/chat-messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${DIFY_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      inputs: {},
+      query: message,
+      response_mode: 'blocking',
+      conversation_id: difyConversationId,
+      user: browserConversationId,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.message || `Dify回應錯誤 (${response.status})`);
+  }
+  if (data.conversation_id) {
+    difyConversations.set(browserConversationId, data.conversation_id);
+  }
+  return data.answer;
+}
 
 const PORT = 3939;
 const HOST = '127.0.0.1'; // loopback only - local test tool for whoever is at this machine
@@ -151,13 +195,22 @@ async function main() {
           return;
         }
         const message = (payload.message || '').trim();
+        const conversationId = (payload.conversation_id || '').trim();
         if (!message) {
           sendJson(res, 400, { detail: '請輸入問題。' });
           return;
         }
-        const result = lookup(message);
-        const reply = buildAnswerText(result);
-        sendJson(res, 200, { reply });
+        if (!conversationId) {
+          sendJson(res, 400, { detail: '缺少session id。' });
+          return;
+        }
+        try {
+          const reply = await askDify(message, conversationId);
+          sendJson(res, 200, { reply });
+        } catch (e) {
+          console.error(e);
+          sendJson(res, 502, { detail: '無法連上查詢服務,請稍後再試。' });
+        }
         return;
       }
 
