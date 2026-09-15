@@ -549,20 +549,30 @@ ${yamlBlockScalar('code', validateEmailCode, 8)}
         version: '2'
         items:
         - variable_selector: [conversation, stage]
-          operation: clear
-          write_mode: clear
+          input_type: constant
+          operation: over-write
+          write_mode: over-write
+          value: idle
         - variable_selector: [conversation, pending_name]
-          operation: clear
-          write_mode: clear
+          input_type: constant
+          operation: over-write
+          write_mode: over-write
+          value: (none)
         - variable_selector: [conversation, pending_ext]
-          operation: clear
-          write_mode: clear
+          input_type: constant
+          operation: over-write
+          write_mode: over-write
+          value: (none)
         - variable_selector: [conversation, pending_dept]
-          operation: clear
-          write_mode: clear
+          input_type: constant
+          operation: over-write
+          write_mode: over-write
+          value: (none)
         - variable_selector: [conversation, pending_loc]
-          operation: clear
-          write_mode: clear
+          input_type: constant
+          operation: over-write
+          write_mode: over-write
+          value: (none)
     - id: answer_invalid_email
       type: custom
       position: {x: 1040, y: 460}
