@@ -135,11 +135,14 @@ function buildAnswerText(result) {
 //   string, "市場暨產品行銷事業群 資通技術處") becomes a pause too - left as
 //   a plain space, Piper's chunker can end up splitting the audio mid-word
 //   at a seemingly random point instead of at that space
+// A full stop ("。") gives a noticeably cleaner break than a dunhao/comma at
+// these two join points - user A/B/C tested all three on real answers and
+// picked the full stop, even though it reads a bit like a run-on sentence.
 const CHINESE_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 function toSpokenText(text) {
   return text
-    .replace(/\(([^)]*)\)/g, '、$1')
-    .replace(/([一-鿿])\s+([一-鿿])/g, '$1、$2')
+    .replace(/\(([^)]*)\)/g, '。$1')
+    .replace(/([一-鿿])\s+([一-鿿])/g, '$1。$2')
     .replace(/\d+/g, (run) => run.split('').map((d) => CHINESE_DIGITS[Number(d)]).join(''));
 }
 
