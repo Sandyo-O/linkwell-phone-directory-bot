@@ -138,11 +138,19 @@ function buildAnswerText(result) {
 // A full stop ("。") gives a noticeably cleaner break than a dunhao/comma at
 // these two join points - user A/B/C tested all three on real answers and
 // picked the full stop, even though it reads a bit like a run-on sentence.
+// - Dify's answers are also formatted as separate lines ("姓名:...\n分機:...\n...")
+//   for on-screen readability. The CJK-space rule above already turns most of
+//   those newlines into the same pause (its \s matches \n too), but not the
+//   ones next to a digit or punctuation mark ("...2037\n部門..." or
+//   "查到了!\n\n姓名...") since those aren't between two Chinese characters -
+//   catch whatever newlines are left over explicitly.
 const CHINESE_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 function toSpokenText(text) {
   return text
     .replace(/\(([^)]*)\)/g, '。$1')
     .replace(/([一-鿿])\s+([一-鿿])/g, '$1。$2')
+    .replace(/\n+/g, '。')
+    .replace(/。{2,}/g, '。')
     .replace(/\d+/g, (run) => run.split('').map((d) => CHINESE_DIGITS[Number(d)]).join(''));
 }
 
