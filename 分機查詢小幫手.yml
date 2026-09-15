@@ -305,29 +305,24 @@ workflow:
         items:
         - variable_selector: [conversation, stage]
           input_type: constant
-          operation: over-write
-          write_mode: over-write
-          value: ''
+          operation: clear
+          write_mode: clear
         - variable_selector: [conversation, pending_name]
           input_type: constant
-          operation: over-write
-          write_mode: over-write
-          value: ''
+          operation: clear
+          write_mode: clear
         - variable_selector: [conversation, pending_ext]
           input_type: constant
-          operation: over-write
-          write_mode: over-write
-          value: ''
+          operation: clear
+          write_mode: clear
         - variable_selector: [conversation, pending_dept]
           input_type: constant
-          operation: over-write
-          write_mode: over-write
-          value: ''
+          operation: clear
+          write_mode: clear
         - variable_selector: [conversation, pending_loc]
           input_type: constant
-          operation: over-write
-          write_mode: over-write
-          value: ''
+          operation: clear
+          write_mode: clear
     - id: answer_invalid_email
       type: custom
       position: {x: 1040, y: 460}
