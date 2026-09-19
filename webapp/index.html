@@ -62,9 +62,10 @@
   .bubble-row.assistant .bubble { background: var(--bg-panel-2); border: 1px solid var(--border-glow); border-bottom-left-radius: 4px; }
   .bubble.pending { opacity: 0.6; }
   .bubble.error { border-color: #f87171; color: #fca5a5; }
+  .bubble .mailto-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .bubble .mailto-btn {
-    display: inline-block; margin-top: 10px; padding: 8px 14px; border-radius: 10px;
-    background: var(--accent-cyan); color: #04121f; text-decoration: none; font-size: 13px; font-weight: 600;
+    display: inline-block; padding: 8px 12px; border-radius: 10px;
+    background: var(--accent-cyan); color: #04121f; text-decoration: none; font-size: 12px; font-weight: 600;
   }
   .input-bar { display: flex; gap: 8px; margin-top: 12px; }
   .input-bar input {
@@ -304,13 +305,23 @@
     window.speechSynthesis.speak(utter);
   }
 
-  // ---------- email (mailto - no server, no API key) ----------
-  function buildMailto(email, result) {
-    const subject = encodeURIComponent('凌群電腦分機查詢結果');
-    const body = encodeURIComponent(
-      `您好,您查詢的同仁 ${result.name} 分機為:${result.ext}\n部門:${result.dept || '未標示'}\n地區:${result.loc || '未標示'}`
-    );
-    return `mailto:${encodeURIComponent(email || '')}?subject=${subject}&body=${body}`;
+  // ---------- email (no server, no API key - just deep links into the
+  // person's own mailbox) ----------
+  // mailto: only actually does anything if the OS has a default mail app
+  // configured, which on Windows is often not the case (no Outlook
+  // installed/set as default) - it silently does nothing or pops up an
+  // unhelpful app-picker. Gmail/Outlook web compose links always work in a
+  // browser regardless of OS mail-client settings, so offer those directly
+  // instead of relying on mailto: alone.
+  function buildEmailLinks(email, result) {
+    const to = email || '';
+    const subject = '凌群電腦分機查詢結果';
+    const body = `您好,您查詢的同仁 ${result.name} 分機為:${result.ext}\n部門:${result.dept || '未標示'}\n地區:${result.loc || '未標示'}`;
+    return {
+      gmail: `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+      outlook: `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+      mailto: `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+    };
   }
 
   // ---------- STT (in-browser Whisper via transformers.js) ----------
@@ -449,12 +460,25 @@
     if (options.error) bubble.classList.add('error');
     bubble.textContent = text;
     if (options.mailResult) {
-      const link = document.createElement('a');
-      link.href = buildMailto(emailInput.value.trim(), options.mailResult);
-      link.className = 'mailto-btn';
-      link.textContent = '📧 用我的Email App寄給自己';
+      const links = buildEmailLinks(emailInput.value.trim(), options.mailResult);
+      const row2 = document.createElement('div');
+      row2.className = 'mailto-row';
+      const buttons = [
+        ['📧 用Gmail網頁版寄給自己', links.gmail],
+        ['📧 用Outlook網頁版寄給自己', links.outlook],
+        ['📧 用電腦預設信件軟體', links.mailto],
+      ];
+      for (const [label, href] of buttons) {
+        const link = document.createElement('a');
+        link.href = href;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.className = 'mailto-btn';
+        link.textContent = label;
+        row2.appendChild(link);
+      }
       bubble.appendChild(document.createElement('br'));
-      bubble.appendChild(link);
+      bubble.appendChild(row2);
     }
     row.appendChild(bubble);
     chatLog.appendChild(row);
