@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>凌群電腦分機查詢(純前端版)</title>
+<style>
+  :root {
+    --bg-deep: #060a14;
+    --bg-panel: #0d1526;
+    --bg-panel-2: #111c33;
+    --border-glow: rgba(56, 189, 248, 0.25);
+    --accent-cyan: #22d3ee;
+    --accent-blue: #2563eb;
+    --text-main: #e6edf7;
+    --text-dim: #7f8ba3;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0; padding: 0;
+    font-family: "Segoe UI", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(56, 189, 248, 0.10) 0, transparent 35%),
+      radial-gradient(circle at 85% 10%, rgba(37, 99, 235, 0.12) 0, transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(56, 189, 248, 0.08) 0, transparent 45%),
+      var(--bg-deep);
+    color: var(--text-main);
+  }
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; max-width: 860px; margin: 0 auto; padding: 20px; }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    padding: 18px 24px; background: linear-gradient(135deg, var(--bg-panel-2), var(--bg-panel));
+    border: 1px solid var(--border-glow); border-radius: 18px;
+    box-shadow: 0 0 24px rgba(34, 211, 238, 0.08); margin-bottom: 16px;
+  }
+  header .logo-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-cyan); box-shadow: 0 0 12px var(--accent-cyan); flex-shrink: 0; }
+  header h1 { font-size: 18px; margin: 0; flex-shrink: 0; }
+  header .subtitle { width: 100%; font-size: 12px; color: var(--text-dim); }
+  .local-badge { font-size: 11px; color: var(--accent-cyan); border: 1px solid var(--border-glow); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  .settings-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 24px; margin-bottom: 16px; font-size: 13px; color: var(--text-dim); }
+  .settings-bar label { display: flex; align-items: center; gap: 8px; }
+  .settings-bar input[type="email"] {
+    background: var(--bg-panel-2); color: var(--text-main); border: 1px solid var(--border-glow);
+    border-radius: 10px; padding: 7px 10px; font-size: 13px; width: 220px; max-width: 50vw;
+  }
+  .response-mode { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .response-mode select {
+    background: var(--bg-panel-2); color: var(--text-main); border: 1px solid var(--border-glow);
+    border-radius: 10px; padding: 7px;
+  }
+  .chat-log { flex: 1; overflow-y: auto; padding: 16px; background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .empty-state { margin: auto; text-align: center; color: var(--text-dim); max-width: 380px; }
+  .empty-state .brain { font-size: 40px; margin-bottom: 12px; }
+  .empty-state .hint { margin-top: 10px; font-size: 12px; opacity: 0.8; }
+  .bubble-row { display: flex; }
+  .bubble-row.user { justify-content: flex-end; }
+  .bubble-row.assistant { justify-content: flex-start; }
+  .bubble {
+    max-width: 78%; padding: 12px 16px; border-radius: 16px; white-space: pre-wrap; line-height: 1.5; font-size: 14px;
+  }
+  .bubble-row.user .bubble { background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)); color: #04121f; border-bottom-right-radius: 4px; }
+  .bubble-row.assistant .bubble { background: var(--bg-panel-2); border: 1px solid var(--border-glow); border-bottom-left-radius: 4px; }
+  .bubble.pending { opacity: 0.6; }
+  .bubble.error { border-color: #f87171; color: #fca5a5; }
+  .bubble .mailto-btn {
+    display: inline-block; margin-top: 10px; padding: 8px 14px; border-radius: 10px;
+    background: var(--accent-cyan); color: #04121f; text-decoration: none; font-size: 13px; font-weight: 600;
+  }
+  .input-bar { display: flex; gap: 8px; margin-top: 12px; }
+  .input-bar input {
+    flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-glow);
+    background: var(--bg-panel-2); color: var(--text-main); font-size: 14px;
+  }
+  .input-bar button {
+    padding: 12px 18px; border-radius: 12px; border: 1px solid var(--border-glow);
+    background: var(--bg-panel-2); color: var(--text-main); cursor: pointer; font-size: 14px;
+  }
+  .input-bar button#sendButton { background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)); color: #04121f; font-weight: 600; border: none; }
+  .input-bar button:disabled { opacity: 0.5; cursor: default; }
+  .input-bar .mic-button { display: grid; place-items: center; padding: 10px 14px; color: var(--accent-cyan); flex-shrink: 0; }
+  .mic-button svg { width: 22px; height: 22px; }
+  .input-bar .mic-button.recording { background: #7f1d1d; color: #fecaca; }
+  .status { min-height: 22px; margin: 8px 4px 0; font-size: 13px; color: var(--text-dim); }
+  .status.error { color: #fca5a5; }
+  [hidden] { display: none !important; }
+  @media (max-width: 600px) {
+    .app { padding: 10px; }
+    header { padding: 14px; }
+    .response-mode { width: 100%; justify-content: flex-end; }
+    .bubble { max-width: 90%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="logo-dot"></span>
+    <h1>凌群電腦分機查詢</h1>
+    <span class="local-badge">🔒 純前端・不需伺服器</span>
+    <label class="response-mode" for="responseMode">回答方式
+      <select id="responseMode">
+        <option value="text">文字回答</option>
+        <option value="voice">語音＋文字回答</option>
+      </select>
+    </label>
+    <span class="subtitle">查詢比對、語音辨識、語音朗讀全部在您的瀏覽器裡執行,不需要任何伺服器開著,關掉這台電腦也不影響其他人用自己的手機/電腦查詢。這是跟Dify版本並存的獨立版本。</span>
+  </header>
+
+  <div class="settings-bar">
+    <label for="emailInput">常用Email(用來預填寄信對象)
+      <input type="email" id="emailInput" placeholder="name@example.com" autocomplete="email" />
+    </label>
+  </div>
+
+  <div class="chat-log" id="chatLog">
+    <div class="empty-state" id="emptyState">
+      <div class="brain">📞</div>
+      <div id="modelStatus">正在載入語音辨識模型(第一次使用會下載,請稍等)…</div>
+      <div class="hint">請輸入或用麥克風說出想查詢的同仁姓名,例如:「請問陳建國的分機是多少」</div>
+    </div>
+  </div>
+
+  <form class="input-bar" id="chatForm" autocomplete="off">
+    <input type="text" id="messageInput" aria-label="問題" placeholder="輸入同仁姓名,或按麥克風說話..." autocomplete="off" />
+    <button type="button" id="micButton" class="mic-button" aria-label="開始錄音" title="開始錄音">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+    </button>
+    <button type="submit" id="sendButton">送出</button>
+  </form>
+  <p class="status" id="inputStatus" role="status" aria-live="polite">模型載入完成前無法使用麥克風,可以先用打字查詢。</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.29.4/dist/index.js"></script>
+<script src="data.js"></script>
+<script type="module">
+  import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
+
+  // ---------- lookup + pinyin fuzzy matching (ported from voice/lookup.js) ----------
+  const DATA = window.PHONE_DIRECTORY.records;
+  const NAME_PINYIN = window.PHONE_DIRECTORY.namePinyin;
+  const uniqueNames = Object.keys(NAME_PINYIN);
+
+  function toPinyin(s) {
+    try {
+      return window.pinyinPro.pinyin(s, { toneType: 'none', separator: '' }).toLowerCase();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const prev = new Array(n + 1), curr = new Array(n + 1);
+    for (let j = 0; j <= n; j++) prev[j] = j;
+    for (let i = 1; i <= m; i++) {
+      curr[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+      }
+      for (let j = 0; j <= n; j++) prev[j] = curr[j];
+    }
+    return prev[n];
+  }
+
+  function fuzzyPinyinMatch(query) {
+    const queryPinyin = toPinyin(query);
+    if (!queryPinyin) return [];
+    const distances = new Map();
+    for (const name of uniqueNames) {
+      const namePy = NAME_PINYIN[name];
+      if (!namePy) continue;
+      const hardCap = namePy.length <= 6 ? 0 : namePy.length <= 9 ? 1 : 2;
+      let best = Infinity;
+      for (let i = 0; i < queryPinyin.length; i++) {
+        for (let len = namePy.length - hardCap; len <= namePy.length + hardCap; len++) {
+          if (len <= 0 || i + len > queryPinyin.length) continue;
+          const window_ = queryPinyin.slice(i, i + len);
+          const dist = levenshtein(namePy, window_);
+          if (dist < best) best = dist;
+        }
+      }
+      if (best <= hardCap) distances.set(name, best);
+    }
+    if (distances.size === 0) return [];
+    const minDist = Math.min(...distances.values());
+    const margin = minDist >= 2 ? 1 : 0;
+    const found = new Set([...distances.entries()].filter(([, d]) => d <= minDist + margin).map(([n]) => n));
+    return DATA.filter((r) => found.has(r.name));
+  }
+
+  function lookup(query) {
+    const q = (query || '').trim();
+    const qNoSpace = q.replace(/ /g, '').replace(/　/g, '');
+    const seen = new Set();
+    let matches = [];
+    for (const r of DATA) {
+      const nm = r.name;
+      if (nm && (q.includes(nm) || qNoSpace.includes(nm))) {
+        const key = `${r.loc}|${r.dept}|${nm}|${r.ext}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        matches.push(r);
+      }
+    }
+    let fuzzy = false;
+    if (matches.length === 0) {
+      const fuzzyMatches = fuzzyPinyinMatch(qNoSpace);
+      for (const r of fuzzyMatches) {
+        const key = `${r.loc}|${r.dept}|${r.name}|${r.ext}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        matches.push(r);
+      }
+      if (matches.length > 0) fuzzy = true;
+    }
+    if (matches.length > 1) {
+      const narrowed = matches.filter((r) => (r.dept && qNoSpace.includes(r.dept)) || (r.loc && qNoSpace.includes(r.loc)));
+      if (narrowed.length === 1) matches = narrowed;
+    }
+    let status;
+    if (matches.length === 0) status = 'none';
+    else if (matches.length === 1) status = 'single';
+    else status = 'multiple';
+    const first = matches[0] || { loc: '', dept: '', name: '', ext: '' };
+    const sameName = new Set(matches.map((m) => m.name)).size <= 1;
+    const summaryLines = matches.slice(0, 10).map((m, i) => `${i + 1}. ${m.name} - 部門:${m.dept || '未標示部門'} / 地區:${m.loc || '未標示地區'} / 分機:${m.ext}`);
+    if (matches.length > 10) summaryLines.push(`...還有 ${matches.length - 10} 筆未列出,請輸入更精確的姓名或部門縮小範圍`);
+    return { status, sameName, fuzzy, name: first.name, ext: first.ext, dept: first.dept, loc: first.loc, summary: summaryLines.join('\n'), count: matches.length, matches: matches.slice(0, 10) };
+  }
+
+  function buildAnswerText(result) {
+    const fuzzyNote = result.fuzzy ? '(這是用發音猜的,如果沒聽錯的話)' : '';
+    if (result.status === 'single') {
+      const prefix = result.fuzzy ? `我聽起來像是問${result.name},如果沒聽錯,` : '查到了。';
+      return `${prefix}${result.name}的分機是${result.ext},部門是${result.dept || '未標示'},地區是${result.loc || '未標示'}。`;
+    }
+    if (result.status === 'multiple') {
+      const who = result.sameName ? result.name : null;
+      if (result.sameName) {
+        return `查到${result.count}位同名同姓的${who}${fuzzyNote},分屬不同部門:\n${result.summary}\n請說出或輸入部門/地區名稱來確認是哪一位。`;
+      }
+      return `找到${result.count}筆符合的同仁:\n${result.summary}\n請輸入更完整的姓名。`;
+    }
+    return '抱歉,查無此人,請確認姓名是否正確。';
+  }
+
+  // ---------- TTS (browser built-in) ----------
+  const CHINESE_DIGITS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  function toSpokenText(text) {
+    return text
+      .replace(/\(([^)]*)\)/g, '。$1')
+      .replace(/([一-鿿])\s+([一-鿿])/g, '$1。$2')
+      .replace(/\n+/g, '。')
+      .replace(/。{2,}/g, '。')
+      .replace(/\d+/g, (run) => run.split('').map((d) => CHINESE_DIGITS[Number(d)]).join(''));
+  }
+
+  let zhVoice = null;
+  function pickChineseVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    zhVoice = voices.find((v) => v.lang === 'zh-TW') || voices.find((v) => v.lang && v.lang.startsWith('zh')) || null;
+  }
+  window.speechSynthesis?.addEventListener('voiceschanged', pickChineseVoice);
+  pickChineseVoice();
+
+  function speak(text) {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(toSpokenText(text));
+    utter.lang = 'zh-TW';
+    if (zhVoice) utter.voice = zhVoice;
+    window.speechSynthesis.speak(utter);
+  }
+
+  // ---------- email (mailto - no server, no API key) ----------
+  function buildMailto(email, result) {
+    const subject = encodeURIComponent('凌群電腦分機查詢結果');
+    const body = encodeURIComponent(
+      `您好,您查詢的同仁 ${result.name} 分機為:${result.ext}\n部門:${result.dept || '未標示'}\n地區:${result.loc || '未標示'}`
+    );
+    return `mailto:${encodeURIComponent(email || '')}?subject=${subject}&body=${body}`;
+  }
+
+  // ---------- STT (in-browser Whisper via transformers.js) ----------
+  const modelStatus = document.getElementById('modelStatus');
+  const micButton = document.getElementById('micButton');
+  const inputStatus = document.getElementById('inputStatus');
+  let transcriber = null;
+  let modelReady = false;
+
+  async function loadModel() {
+    try {
+      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.file) {
+            modelStatus.textContent = `正在下載語音辨識模型... ${p.file} ${Math.round(p.progress || 0)}%`;
+          }
+        },
+      });
+      modelReady = true;
+      modelStatus.textContent = '語音辨識模型已就緒,可以直接輸入或用麥克風查詢。';
+      setInputStatus('模型已就緒,按麥克風開始錄音,再按一次停止。');
+      updateControls();
+    } catch (e) {
+      console.error(e);
+      modelStatus.textContent = '語音辨識模型載入失敗,仍可用打字查詢。';
+    }
+  }
+  loadModel();
+
+  async function decodeToWhisperInput(blob) {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+    const targetRate = 16000;
+    const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    const rendered = await offlineCtx.startRendering();
+    audioCtx.close();
+    return rendered.getChannelData(0);
+  }
+
+  // ---------- chat UI ----------
+  const chatLog = document.getElementById('chatLog');
+  const emptyState = document.getElementById('emptyState');
+  const chatForm = document.getElementById('chatForm');
+  const messageInput = document.getElementById('messageInput');
+  const sendButton = document.getElementById('sendButton');
+  const responseMode = document.getElementById('responseMode');
+  const emailInput = document.getElementById('emailInput');
+  let chatBusy = false;
+  let recordingState = 'idle';
+  let recorder = null;
+  let recordingStream = null;
+
+  const EMAIL_STORAGE_KEY = 'syscom-ext-lookup-email';
+  const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  try { emailInput.value = localStorage.getItem(EMAIL_STORAGE_KEY) || ''; } catch (e) {}
+  emailInput.addEventListener('change', () => {
+    const value = emailInput.value.trim();
+    try {
+      if (EMAIL_PATTERN.test(value)) localStorage.setItem(EMAIL_STORAGE_KEY, value);
+      else if (!value) localStorage.removeItem(EMAIL_STORAGE_KEY);
+    } catch (e) {}
+  });
+
+  function setInputStatus(text, error = false) {
+    inputStatus.textContent = text;
+    inputStatus.classList.toggle('error', error);
+  }
+
+  const microphoneAvailable = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
+  function updateControls() {
+    sendButton.disabled = chatBusy || recordingState !== 'idle';
+    messageInput.disabled = recordingState !== 'idle';
+    micButton.disabled = !microphoneAvailable || !modelReady || chatBusy || recordingState === 'starting' || recordingState === 'transcribing';
+    const recording = recordingState === 'recording';
+    micButton.classList.toggle('recording', recording);
+    micButton.title = recording ? '停止錄音並辨識' : '開始錄音';
+  }
+  if (!microphoneAvailable) setInputStatus('麥克風需要 HTTPS 或 localhost,以及支援錄音的新版瀏覽器;仍可打字提問。');
+  updateControls();
+
+  function addBubble(role, text, options = {}) {
+    if (emptyState) emptyState.remove();
+    const row = document.createElement('div');
+    row.className = `bubble-row ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    if (options.pending) bubble.classList.add('pending');
+    if (options.error) bubble.classList.add('error');
+    bubble.textContent = text;
+    if (options.mailResult) {
+      const link = document.createElement('a');
+      link.href = buildMailto(emailInput.value.trim(), options.mailResult);
+      link.className = 'mailto-btn';
+      link.textContent = '📧 用我的Email App寄給自己';
+      bubble.appendChild(document.createElement('br'));
+      bubble.appendChild(link);
+    }
+    row.appendChild(bubble);
+    chatLog.appendChild(row);
+    chatLog.scrollTop = chatLog.scrollHeight;
+    return bubble;
+  }
+
+  function handleQuery(message) {
+    addBubble('user', message);
+    const result = lookup(message);
+    const answerText = buildAnswerText(result);
+    addBubble('assistant', answerText, result.status === 'single' ? { mailResult: result } : {});
+    if (responseMode.value === 'voice') speak(answerText);
+  }
+
+  chatForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const message = messageInput.value.trim();
+    if (!message || chatBusy || recordingState !== 'idle') return;
+    window.speechSynthesis?.cancel();
+    messageInput.value = '';
+    handleQuery(message);
+    messageInput.focus();
+  });
+
+  function releaseMicrophone() {
+    recordingStream?.getTracks().forEach((track) => track.stop());
+    recordingStream = null;
+  }
+
+  function stopRecording() {
+    if (recorder?.state === 'recording') {
+      recordingState = 'transcribing';
+      updateControls();
+      recorder.stop();
+      releaseMicrophone();
+    }
+  }
+
+  async function startRecording() {
+    if (chatBusy || recordingState !== 'idle' || !modelReady) return;
+    window.speechSynthesis?.cancel();
+    recordingState = 'starting';
+    updateControls();
+    setInputStatus('正在取得麥克風權限…');
+    try {
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
+      if (!mimeType) throw new Error('此瀏覽器不支援所需錄音格式,請改用新版 Chrome、Edge 或 Safari。');
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorder = new MediaRecorder(recordingStream, { mimeType });
+      const chunks = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = async () => {
+        releaseMicrophone();
+        recordingState = 'transcribing';
+        updateControls();
+        try {
+          const blob = new Blob(chunks, { type: mimeType });
+          if (!blob.size) throw new Error('沒有錄到聲音,請重新錄製。');
+          setInputStatus('正在辨識語音(本機Whisper,瀏覽器內執行)…');
+          const audio = await decodeToWhisperInput(blob);
+          const sttResult = await transcriber(audio, { language: 'chinese', task: 'transcribe' });
+          const text = (sttResult.text || '').trim();
+          if (!text) throw new Error('未辨識到語音,請重新錄製。');
+          messageInput.value = text;
+          setInputStatus('語音已轉成文字,確認或修改後按「送出」。');
+        } catch (error) {
+          setInputStatus(error.message, true);
+        } finally {
+          recordingState = 'idle';
+          updateControls();
+          messageInput.focus();
+        }
+      };
+      recorder.start();
+      recordingState = 'recording';
+      updateControls();
+      setInputStatus('錄音中…再按麥克風停止(最長30秒)。');
+      setTimeout(() => { if (recordingState === 'recording') stopRecording(); }, 30000);
+    } catch (error) {
+      releaseMicrophone();
+      recordingState = 'idle';
+      updateControls();
+      const messages = {
+        NotAllowedError: '未取得麥克風權限,請在瀏覽器允許麥克風後再試。',
+        NotFoundError: '找不到麥克風,請接上麥克風後再試。',
+      };
+      setInputStatus(messages[error.name] || error.message, true);
+    }
+  }
+
+  micButton.addEventListener('click', () => (recordingState === 'recording' ? stopRecording() : startRecording()));
+</script>
+</body>
+</html>
