@@ -134,7 +134,7 @@
         <option value="voice">語音＋文字回答</option>
       </select>
     </label>
-    <span class="subtitle">查詢比對、語音辨識、語音朗讀全部在您的瀏覽器裡執行,不需要任何伺服器開著,關掉這台電腦也不影響其他人用自己的手機/電腦查詢。這是跟Dify版本並存的獨立版本。</span>
+    <span class="subtitle">查詢比對、語音朗讀在您的瀏覽器裡執行;語音辨識使用瀏覽器內建的語音服務(Chrome/Edge,經Google雲端處理)。全部不需要任何伺服器開著,關掉這台電腦也不影響其他人用自己的手機/電腦查詢。這是跟Dify版本並存的獨立版本。</span>
   </header>
 
   <div class="settings-bar">
@@ -146,7 +146,7 @@
   <div class="chat-log" id="chatLog">
     <div class="empty-state" id="emptyState">
       <div class="brain">📞</div>
-      <div id="modelStatus">正在載入語音辨識模型(第一次使用會下載,請稍等)…</div>
+      <div id="modelStatus">語音辨識已就緒(使用瀏覽器內建語音服務)。</div>
       <div class="hint">請輸入或用麥克風說出想查詢的同仁姓名,例如:「請問陳建國的分機是多少」</div>
     </div>
   </div>
@@ -158,14 +158,12 @@
     </button>
     <button type="submit" id="sendButton">送出</button>
   </form>
-  <p class="status" id="inputStatus" role="status" aria-live="polite">模型載入完成前無法使用麥克風,可以先用打字查詢。</p>
+  <p class="status" id="inputStatus" role="status" aria-live="polite">按麥克風開始說話,說完會自動辨識。</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.29.4/dist/index.js"></script>
 <script src="data.js"></script>
-<script type="module">
-  import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0';
-
+<script>
   // ---------- lookup + pinyin fuzzy matching (ported from voice/lookup.js) ----------
   const DATA = window.PHONE_DIRECTORY.records;
   const NAME_PINYIN = window.PHONE_DIRECTORY.namePinyin;
@@ -325,44 +323,18 @@
     };
   }
 
-  // ---------- STT (in-browser Whisper via transformers.js) ----------
+  // ---------- STT (browser's built-in Web Speech API - no download, no
+  // server, free, but not on-premise: Chrome/Edge route this through
+  // Google's own speech recognition service) ----------
   const modelStatus = document.getElementById('modelStatus');
   const micButton = document.getElementById('micButton');
   const inputStatus = document.getElementById('inputStatus');
-  let transcriber = null;
-  let modelReady = false;
-
-  // whisper-tiny instead of whisper-base: smaller download (~40MB vs
-  // ~140MB+), much more likely to actually finish on a phone's network/
-  // storage limits. Trades a bit of accuracy, but the fuzzy pinyin matcher
-  // in lookup() already exists specifically to cover for that.
-  async function loadModel() {
-    try {
-      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-        progress_callback: (p) => {
-          if (p.status === 'progress' && p.file) {
-            modelStatus.textContent = `正在下載語音辨識模型... ${p.file} ${Math.round(p.progress || 0)}%`;
-          }
-        },
-      });
-      modelReady = true;
-      modelStatus.textContent = '語音辨識模型已就緒,可以直接輸入或用麥克風查詢。';
-      setInputStatus('模型已就緒,按麥克風開始錄音,再按一次停止。');
-      updateControls();
-    } catch (e) {
-      console.error(e);
-      modelStatus.innerHTML = '';
-      modelStatus.append(`語音辨識模型載入失敗(${e.message || e}),仍可用打字查詢。`, document.createElement('br'));
-      const retryBtn = document.createElement('button');
-      retryBtn.type = 'button';
-      retryBtn.textContent = '重試';
-      retryBtn.style.cssText = 'margin-top:8px;padding:6px 14px;border-radius:10px;border:1px solid var(--border-glow);background:var(--bg-panel-2);color:var(--text-main);cursor:pointer;';
-      retryBtn.addEventListener('click', () => {
-        modelStatus.textContent = '正在載入語音辨識模型...';
-        loadModel();
-      });
-      modelStatus.appendChild(retryBtn);
-    }
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const speechRecognitionAvailable = window.isSecureContext && !!SpeechRecognitionCtor;
+  if (speechRecognitionAvailable) {
+    modelStatus.textContent = '語音辨識已就緒(使用瀏覽器內建語音服務),可以直接輸入或用麥克風查詢。';
+  } else {
+    modelStatus.textContent = '此瀏覽器不支援語音辨識,請改用Chrome或Edge,或直接用打字查詢。';
   }
 
   // ---------- password gate ----------
@@ -387,7 +359,6 @@
   function unlockApp() {
     gateOverlay.hidden = true;
     mainApp.hidden = false;
-    loadModel();
   }
 
   try {
@@ -409,21 +380,6 @@
     }
   });
 
-  async function decodeToWhisperInput(blob) {
-    const arrayBuffer = await blob.arrayBuffer();
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-    const targetRate = 16000;
-    const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
-    const source = offlineCtx.createBufferSource();
-    source.buffer = decoded;
-    source.connect(offlineCtx.destination);
-    source.start(0);
-    const rendered = await offlineCtx.startRendering();
-    audioCtx.close();
-    return rendered.getChannelData(0);
-  }
-
   // ---------- chat UI ----------
   const chatLog = document.getElementById('chatLog');
   const emptyState = document.getElementById('emptyState');
@@ -434,8 +390,7 @@
   const emailInput = document.getElementById('emailInput');
   let chatBusy = false;
   let recordingState = 'idle';
-  let recorder = null;
-  let recordingStream = null;
+  let recognition = null;
 
   const EMAIL_STORAGE_KEY = 'syscom-ext-lookup-email';
   const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -453,16 +408,16 @@
     inputStatus.classList.toggle('error', error);
   }
 
-  const microphoneAvailable = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
   function updateControls() {
     sendButton.disabled = chatBusy || recordingState !== 'idle';
     messageInput.disabled = recordingState !== 'idle';
-    micButton.disabled = !microphoneAvailable || !modelReady || chatBusy || recordingState === 'starting' || recordingState === 'transcribing';
+    micButton.disabled = !speechRecognitionAvailable || chatBusy || recordingState === 'starting';
     const recording = recordingState === 'recording';
     micButton.classList.toggle('recording', recording);
-    micButton.title = recording ? '停止錄音並辨識' : '開始錄音';
+    micButton.title = recording ? '停止錄音' : '開始說話';
   }
-  if (!microphoneAvailable) setInputStatus('麥克風需要 HTTPS 或 localhost,以及支援錄音的新版瀏覽器;仍可打字提問。');
+  if (!speechRecognitionAvailable) setInputStatus('此瀏覽器不支援語音辨識,請改用Chrome或Edge,仍可打字提問。', true);
+  else setInputStatus('按麥克風開始說話,說完會自動辨識。');
   updateControls();
 
   function addBubble(role, text, options = {}) {
@@ -538,69 +493,58 @@
     messageInput.focus();
   });
 
-  function releaseMicrophone() {
-    recordingStream?.getTracks().forEach((track) => track.stop());
-    recordingStream = null;
-  }
-
   function stopRecording() {
-    if (recorder?.state === 'recording') {
-      recordingState = 'transcribing';
-      updateControls();
-      recorder.stop();
-      releaseMicrophone();
-    }
+    if (recordingState === 'recording') recognition?.stop();
   }
 
-  async function startRecording() {
-    if (chatBusy || recordingState !== 'idle' || !modelReady) return;
+  function startRecording() {
+    if (chatBusy || recordingState !== 'idle' || !speechRecognitionAvailable) return;
     window.speechSynthesis?.cancel();
     recordingState = 'starting';
     updateControls();
     setInputStatus('正在取得麥克風權限…');
-    try {
-      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
-      if (!mimeType) throw new Error('此瀏覽器不支援所需錄音格式,請改用新版 Chrome、Edge 或 Safari。');
-      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      recorder = new MediaRecorder(recordingStream, { mimeType });
-      const chunks = [];
-      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-      recorder.onstop = async () => {
-        releaseMicrophone();
-        recordingState = 'transcribing';
-        updateControls();
-        try {
-          const blob = new Blob(chunks, { type: mimeType });
-          if (!blob.size) throw new Error('沒有錄到聲音,請重新錄製。');
-          setInputStatus('正在辨識語音(本機Whisper,瀏覽器內執行)…');
-          const audio = await decodeToWhisperInput(blob);
-          const sttResult = await transcriber(audio, { language: 'chinese', task: 'transcribe' });
-          const text = (sttResult.text || '').trim();
-          if (!text) throw new Error('未辨識到語音,請重新錄製。');
-          messageInput.value = text;
-          setInputStatus('語音已轉成文字,確認或修改後按「送出」。');
-        } catch (error) {
-          setInputStatus(error.message, true);
-        } finally {
-          recordingState = 'idle';
-          updateControls();
-          messageInput.focus();
-        }
-      };
-      recorder.start();
+
+    recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'zh-TW';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
       recordingState = 'recording';
       updateControls();
-      setInputStatus('錄音中…再按麥克風停止(最長30秒)。');
-      setTimeout(() => { if (recordingState === 'recording') stopRecording(); }, 30000);
-    } catch (error) {
-      releaseMicrophone();
+      setInputStatus('聆聽中…請說出想查詢的姓名,說完會自動辨識。');
+    };
+    recognition.onresult = (event) => {
+      const text = (event.results?.[0]?.[0]?.transcript || '').trim();
+      if (text) {
+        messageInput.value = text;
+        setInputStatus('語音已轉成文字,確認或修改後按「送出」。');
+      } else {
+        setInputStatus('未辨識到語音,請重新錄製。', true);
+      }
+    };
+    recognition.onerror = (event) => {
+      const messages = {
+        'not-allowed': '未取得麥克風權限,請在瀏覽器允許麥克風後再試。',
+        'no-speech': '未偵測到語音,請靠近麥克風重新錄製。',
+        'audio-capture': '找不到麥克風,請接上麥克風後再試。',
+        network: '語音辨識服務連線失敗,請檢查網路後再試。',
+      };
+      setInputStatus(messages[event.error] || `語音辨識發生錯誤(${event.error})`, true);
+    };
+    recognition.onend = () => {
       recordingState = 'idle';
       updateControls();
-      const messages = {
-        NotAllowedError: '未取得麥克風權限,請在瀏覽器允許麥克風後再試。',
-        NotFoundError: '找不到麥克風,請接上麥克風後再試。',
-      };
-      setInputStatus(messages[error.name] || error.message, true);
+      messageInput.focus();
+    };
+
+    try {
+      recognition.start();
+    } catch (error) {
+      recordingState = 'idle';
+      updateControls();
+      setInputStatus(error.message, true);
     }
   }
 
