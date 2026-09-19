@@ -83,6 +83,24 @@
   .status { min-height: 22px; margin: 8px 4px 0; font-size: 13px; color: var(--text-dim); }
   .status.error { color: #fca5a5; }
   [hidden] { display: none !important; }
+  .gate-overlay {
+    position: fixed; inset: 0; background: var(--bg-deep); display: grid; place-items: center; z-index: 10; padding: 20px;
+  }
+  .gate-card {
+    background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 18px;
+    padding: 32px; text-align: center; max-width: 320px; width: 100%;
+  }
+  .gate-card h2 { margin: 0 0 8px; font-size: 16px; }
+  .gate-card p { margin: 0 0 16px; font-size: 13px; color: var(--text-dim); }
+  .gate-card input {
+    width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border-glow);
+    background: var(--bg-panel-2); color: var(--text-main); font-size: 14px; margin-bottom: 12px;
+  }
+  .gate-card button {
+    width: 100%; padding: 12px; border-radius: 12px; border: none; cursor: pointer; font-size: 14px; font-weight: 600;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)); color: #04121f;
+  }
+  .gate-card .gate-error { min-height: 18px; color: #fca5a5; font-size: 12px; margin-top: 8px; }
   @media (max-width: 600px) {
     .app { padding: 10px; }
     header { padding: 14px; }
@@ -92,7 +110,18 @@
 </style>
 </head>
 <body>
-<div class="app">
+<div class="gate-overlay" id="gateOverlay">
+  <div class="gate-card">
+    <h2>🔒 內部工具</h2>
+    <p>請輸入通用密碼才能使用分機查詢</p>
+    <form id="gateForm">
+      <input type="password" id="gatePassword" placeholder="密碼" autocomplete="off" autofocus />
+      <button type="submit">進入</button>
+    </form>
+    <div class="gate-error" id="gateError"></div>
+  </div>
+</div>
+<div class="app" id="mainApp" hidden>
   <header>
     <span class="logo-dot"></span>
     <h1>凌群電腦分機查詢</h1>
@@ -309,7 +338,50 @@
       modelStatus.textContent = '語音辨識模型載入失敗,仍可用打字查詢。';
     }
   }
-  loadModel();
+
+  // ---------- password gate ----------
+  // This is a deterrent against casually stumbling on the link, not real
+  // access control - the whole page (including this check) is visible to
+  // anyone who views the page source, so a determined person can bypass it.
+  // Hashing the password at least means a casual look at the source doesn't
+  // immediately hand over the plaintext.
+  const GATE_STORAGE_KEY = 'syscom-ext-lookup-unlocked';
+  const GATE_PASSWORD_HASH = 'a07297066ca3cc65e324e6bd8430225b52a5c594670fece21aca81a6837a076b';
+  const gateOverlay = document.getElementById('gateOverlay');
+  const mainApp = document.getElementById('mainApp');
+  const gateForm = document.getElementById('gateForm');
+  const gatePassword = document.getElementById('gatePassword');
+  const gateError = document.getElementById('gateError');
+
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function unlockApp() {
+    gateOverlay.hidden = true;
+    mainApp.hidden = false;
+    loadModel();
+  }
+
+  try {
+    if (localStorage.getItem(GATE_STORAGE_KEY) === 'true') unlockApp();
+  } catch (e) {
+    unlockApp(); // storage blocked (private browsing etc.) - don't hard-lock the page over it
+  }
+
+  gateForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const hash = await sha256Hex(gatePassword.value);
+    if (hash === GATE_PASSWORD_HASH) {
+      try { localStorage.setItem(GATE_STORAGE_KEY, 'true'); } catch (e) {}
+      unlockApp();
+    } else {
+      gateError.textContent = '密碼錯誤,請再試一次。';
+      gatePassword.value = '';
+      gatePassword.focus();
+    }
+  });
 
   async function decodeToWhisperInput(blob) {
     const arrayBuffer = await blob.arrayBuffer();
