@@ -19,7 +19,11 @@ const { lookup } = require('./lookup');
 // with non-name replies like "要"/"不用"/an email address.
 function correctMishearName(message) {
   const result = lookup(message);
-  if (result.fuzzy && result.status === 'single') return result.name;
+  // status 'multiple' + sameName just means several department entries for
+  // the ONE person the fuzzy match found (Dify's own multi-department
+  // handling takes it from there) - only leave the message uncorrected when
+  // the fuzzy match is genuinely ambiguous between two different people.
+  if (result.fuzzy && (result.status === 'single' || result.sameName)) return result.name;
   return message;
 }
 
@@ -162,10 +166,14 @@ async function main() {
         }
         const inputPath = path.join(os.tmpdir(), `voice-in-${Date.now()}.${extension}`);
         try {
+          const t0 = Date.now();
           fs.writeFileSync(inputPath, data);
           const audio = await loadAudioAsFloat32(inputPath);
+          const t1 = Date.now();
           const sttResult = await transcriber(audio, { language: 'chinese', task: 'transcribe' });
+          const t2 = Date.now();
           const text = s2t(sttResult.text.trim());
+          console.log(`[timing] transcribe: ffmpeg=${t1 - t0}ms whisper=${t2 - t1}ms total=${t2 - t0}ms audioBytes=${data.length}`);
           if (!text) {
             sendJson(res, 422, { detail: '未辨識到語音,請靠近麥克風重新錄製。' });
             return;
@@ -206,8 +214,11 @@ async function main() {
         }
         const outputPath = path.join(os.tmpdir(), `voice-speech-${Date.now()}.wav`);
         try {
-          synthesize(toSpokenText(text), outputPath);
+          const t0 = Date.now();
+          await synthesize(toSpokenText(text), outputPath);
+          const t1 = Date.now();
           const audioBuf = fs.readFileSync(outputPath);
+          console.log(`[timing] speech: piper=${t1 - t0}ms textLen=${text.length}`);
           res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
           res.end(audioBuf);
         } catch (e) {
@@ -246,8 +257,12 @@ async function main() {
           return;
         }
         try {
+          const t0 = Date.now();
           const correctedMessage = correctMishearName(message);
+          const t1 = Date.now();
           const reply = await askDify(correctedMessage, conversationId, defaultEmail);
+          const t2 = Date.now();
+          console.log(`[timing] chat: fuzzyCheck=${t1 - t0}ms dify=${t2 - t1}ms`);
           sendJson(res, 200, { reply });
         } catch (e) {
           console.error(e);

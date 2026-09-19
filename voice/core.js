@@ -1,5 +1,6 @@
 const { pipeline } = require('@xenova/transformers');
-const { execFileSync, execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
+const readline = require('readline');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -58,11 +59,39 @@ async function loadAudioAsFloat32(inputPath) {
   return floatArray;
 }
 
-function synthesize(text, outWavPath) {
-  const absOut = path.resolve(outWavPath);
-  execFileSync(PIPER_EXE, ['--model', PIPER_VOICE, '--output_file', absOut], {
-    input: text,
+// Keep one piper process running and feed it one JSON line per request
+// (--json-input) instead of spawning a fresh process per call - re-spawning
+// piper pays ~0.3-0.5s just to reload the voice model every single time,
+// which dominates the cost for short answers. In this mode piper prints the
+// output_file path to stdout as each line finishes, in the same order the
+// lines were submitted, so a plain FIFO queue is enough to match completions
+// back to the right caller - no need to parse the path itself.
+let piperProcess = null;
+let piperQueue = [];
+
+function startPiperProcess() {
+  const proc = spawn(PIPER_EXE, ['--model', PIPER_VOICE, '--json-input'], {
     cwd: path.dirname(PIPER_EXE),
+  });
+  readline.createInterface({ input: proc.stdout }).on('line', () => {
+    const pending = piperQueue.shift();
+    if (pending) pending.resolve();
+  });
+  proc.on('exit', (code) => {
+    const failed = piperQueue.splice(0);
+    failed.forEach((p) => p.reject(new Error(`piper行程意外結束(code ${code})`)));
+    if (piperProcess === proc) piperProcess = null;
+  });
+  proc.stdin.on('error', () => {}); // avoid crashing on EPIPE if the process died mid-write
+  return proc;
+}
+
+function synthesize(text, outWavPath) {
+  if (!piperProcess) piperProcess = startPiperProcess();
+  const absOut = path.resolve(outWavPath);
+  return new Promise((resolve, reject) => {
+    piperQueue.push({ resolve, reject });
+    piperProcess.stdin.write(JSON.stringify({ text, output_file: absOut }) + '\n');
   });
 }
 
@@ -177,7 +206,7 @@ async function answerFromAudioFile(transcriber, inputPath, outWavPath) {
 
   const result = lookup(questionText);
   const answerText = buildAnswerText(result);
-  synthesize(toSpokenText(answerText), outWavPath);
+  await synthesize(toSpokenText(answerText), outWavPath);
 
   return {
     recognized_raw: questionTextRaw,
