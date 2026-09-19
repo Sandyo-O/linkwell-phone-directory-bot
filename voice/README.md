@@ -2,8 +2,8 @@
 
 這是「打電話問分機」功能裡,負責「聽懂語音、查資料、講出答案」的核心引擎。全部在你的電腦上運算,**沒有呼叫任何雲端API**:
 
-- **語音辨識(STT)**:Whisper-small模型,透過 `@xenova/transformers`(ONNX Runtime)在本機CPU執行
-- **簡繁轉換**:`opencc-js`,因為Whisper預設輸出簡體字,但公司分機資料是繁體
+- **語音辨識(STT)**:SenseVoice-small模型(阿里巴巴FunASR),透過一個常駐的Python小型服務(`sensevoice_server.py`)在本機CPU執行,`server.js`啟動時會自動幫你啟動這個服務。原本用Whisper-small(`@xenova/transformers`),測試發現SenseVoice在真實姓名上準確度打平,但速度快了約10~15倍,所以換掉了(細節見下面「效能」)
+- **簡繁轉換**:`opencc-js`,因為SenseVoice/Whisper預設輸出簡體字,但公司分機資料是繁體
 - **查詢比對**:跟Dify工作流程裡同一套邏輯(姓名比對+同名同姓時用部門/地區縮小範圍),另外加了**拼音模糊比對**當備援:如果Whisper把姓名的字聽錯,但唸起來的音接近資料庫裡的姓名,還是抓得到人(例如「史印辰」被聽成「是硬沉」,拼音幾乎一樣,還是能查到);查到後會誠實告訴你「我聽起來像是問XX,如果沒聽錯...」,不會裝作聽得很準
 - **語音合成(TTS)**:Piper(zh_CN-huayan-medium 中文女聲),本機執行
 
@@ -12,7 +12,7 @@
 `voice/piper/` 和 `voice/node_modules/` 沒有放進版本控制(檔案太大),需要重新下載/安裝:
 
 ```bash
-# 1. 安裝npm套件(Whisper、簡繁轉換等)
+# 1. 安裝npm套件(簡繁轉換、拼音比對等)
 cd voice
 npm install
 
@@ -27,9 +27,14 @@ rm -rf piper_tmp piper_windows_amd64.zip
 mkdir -p piper/voices
 curl -sSL -o piper/voices/zh_CN-huayan-medium.onnx https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx
 curl -sSL -o piper/voices/zh_CN-huayan-medium.onnx.json https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json
+
+# 4. 安裝Python(語音辨識SenseVoice需要),裝好後裝Python套件
+#    Windows可以用winget: winget install Python.Python.3.11
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
 ```
 
-Whisper模型(約280MB)會在第一次執行 `node ask.js` 時自動下載並快取在 `node_modules/@xenova/transformers/.cache/` 裡,之後執行就不用再下載。
+SenseVoice模型(約900MB)會在第一次啟動 `node server.js` 時自動下載並快取在 `~/.cache/modelscope/` 裡,之後執行就不用再下載。`server.js` 啟動時會自動把 `sensevoice_server.py` 當成子行程一起啟動,不需要手動另外執行。
 
 ## 怎麼測試
 
@@ -43,23 +48,25 @@ node ask.js 你的問題錄音.wav 回答.wav
 
 | 測試 | 語音問題 | 結果 |
 |---|---|---|
-| q1.wav | 請問陳建國的分機是多少 | ✅ 正確辨識、正確查到「陳建國/8649/可取」|
-| q2.wav | 陳祐萱的分機是多少 | ✅ Whisper誤聽成「陳佑軒」,但拼音模糊比對抓回「陳祐萱」|
-| (使用者實測) | 史印辰的分機號碼 | ✅ Whisper誤聽成「是硬沉」,拼音模糊比對正確抓到「史印辰/4533/台中」|
+| q1.wav | 請問陳建國的分機是多少 | ✅ SenseVoice正確辨識、正確查到「陳建國/8649/可取」|
+| q2.wav | 陳祐萱的分機是多少 | ✅ SenseVoice誤聽成「陳又萱」,拼音模糊比對抓回「陳祐萱」|
+| (使用者實測) | 史印辰的分機號碼 | ✅ (Whisper時期的測試)誤聽成「是硬沉」,拼音模糊比對正確抓到「史印辰/4533/台中」|
+
+換成SenseVoice前,拿同一批錄音檔跟Whisper-small、Whisper-base側面比較過:base雖然快一倍,但在「陳建國」這個測試上把名字聽成兩個完全不同的人(拼音模糊比對也救不回來),所以沒有選base;SenseVoice則是準確度打平small、速度大幅超越,才正式换掉。
 
 ## 效能(在這台筆電上實測,Intel Core 7 240H,無獨立GPU)
 
-- 語音辨識:2~3秒(處理2~3秒長度的語音問題)
-- 語音合成:0.1~0.4秒
-- 單次問答總延遲(不含模型載入):約3~4秒
+- 語音辨識(SenseVoice):約0.1~0.2秒(模型只在伺服器啟動時載入一次,之後每次問答都是熱的)
+- 語音合成(Piper,常駐行程模式):約1.5秒
+- 單次問答總延遲(不含模型載入,含跟Dify的網路來回):約2秒左右
 
-這個速度對「一次一通電話」的使用情境是可接受的,但因為是純CPU運算,**沒辦法同時處理很多通電話**。如果之後要支援多線同時通話,會需要更好的硬體(尤其是GPU)或改用較小的Whisper模型(base/tiny,速度換取一些準確度)。
+換成SenseVoice、Piper改常駐行程之前,分別是Whisper-small約2~3秒、Piper每次重啟約2秒,總延遲約4~5秒。純CPU運算,**還是沒辦法同時處理很多通電話**,但單次問答的體感已經快很多。
 
 ## 已知限制:罕見姓名字容易聽錯(已用拼音模糊比對緩解)
 
-Whisper是通用語音辨識模型,沒有特別針對「公司內部姓名」做過訓練。從測試結果看,常見姓名(如「陳建國」)辨識得很準,但比較少見的字(如「祐萱」的「萱」、「印辰」)容易被聽成同音或形似的其他字。
+不管是Whisper還是SenseVoice,都是通用語音辨識模型,沒有特別針對「公司內部姓名」做過訓練。從測試結果看,常見姓名(如「陳建國」)辨識得很準,但比較少見的字(如「祐萱」的「萱」、「印辰」)容易被聽成同音或形似的其他字。
 
-**現在的做法**:`lookup.js` 在文字完全比對不到人的時候,會退而求其次比對拼音——把辨識結果轉成拼音,跟資料庫裡每個姓名的拼音算「編輯距離」,唸起來夠接近的話就當作候選人。這樣就算Whisper把字聽錯,只要音沒差太多,還是抓得到對的人。回答時機器人會誠實說「我聽起來像是問XX,如果沒聽錯...」,提醒使用者這是模糊比對,不是100%確定。
+**現在的做法**:`lookup.js` 在文字完全比對不到人的時候,會退而求其次比對拼音——把辨識結果轉成拼音,跟資料庫裡每個姓名的拼音算「編輯距離」,唸起來夠接近的話就當作候選人。這樣就算STT把字聽錯,只要音沒差太多,還是抓得到對的人。`server.js` 會用這個修正過的姓名去問Dify,而不是原始(可能聽錯的)文字。純打字模式下機器人原本會誠實說「我聽起來像是問XX,如果沒聽錯...」,現在Dify那邊拿到的已經是修正後的正確姓名,所以是直接查到、不會特別提示這是猜的——這是目前的取捨,如果你更希望使用者也知道「這是拼音猜的」,可以再讓我加回這個提示。
 
 為了避免亂猜(例如隨便一句話裡剛好有幾個字拼音很像「機房」這種2個字的短名字/地點),做了幾個防呆:
 - 只對「拿掉標點後只剩2~4個中文字」的名字做拼音比對,排除「CDO」「TEL」這類混進資料裡的英文縮寫
@@ -68,7 +75,7 @@ Whisper是通用語音辨識模型,沒有特別針對「公司內部姓名」做
 
 這個機制純打字輸入(前面做的Dify聊天機器人)不需要,因為使用者是直接打字輸入正確的姓名,不會有「聽錯字」的問題。
 
-如果之後準確度還是不夠,可以換更大的Whisper模型(medium/large-v3),準確度較高但速度變慢——我還沒做,需要的話再做。
+如果之後準確度還是不夠,可以評估funasr其他模型(SenseVoice-large等),但要注意越大的模型通常越慢——目前SenseVoice-small在準確度和速度上算是不錯的平衡點。
 
 ## 一個已修好的技術細節:中文資料夾路徑
 

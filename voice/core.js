@@ -59,6 +59,25 @@ async function loadAudioAsFloat32(inputPath) {
   return floatArray;
 }
 
+// SenseVoice (via the local Python sidecar, sensevoice_server.py) needs an
+// actual WAV file on disk, not the raw Float32Array Whisper wants.
+function convertToWavFile(inputPath, outWavPath) {
+  execSync(`ffmpeg -y -i "${inputPath}" -ar 16000 -ac 1 "${outWavPath}"`, { stdio: 'pipe' });
+}
+
+const SENSEVOICE_URL = 'http://127.0.0.1:8765/transcribe';
+async function transcribeSenseVoice(wavPath) {
+  const response = await fetch(SENSEVOICE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ wav_path: path.resolve(wavPath) }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error(`SenseVoice服務回應錯誤 (${response.status})`);
+  const data = await response.json();
+  return data.text;
+}
+
 // Keep one piper process running and feed it one JSON line per request
 // (--json-input) instead of spawning a fresh process per call - re-spawning
 // piper pays ~0.3-0.5s just to reload the voice model every single time,
@@ -222,6 +241,8 @@ async function answerFromAudioFile(transcriber, inputPath, outWavPath) {
 module.exports = {
   s2t,
   loadAudioAsFloat32,
+  convertToWavFile,
+  transcribeSenseVoice,
   synthesize,
   buildAnswerText,
   toSpokenText,

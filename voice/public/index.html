@@ -275,7 +275,7 @@
         <option value="voice">語音＋文字回答</option>
       </select>
     </label>
-    <span class="subtitle">語音辨識(Whisper)、查詢比對、語音合成(Piper)全部在這台電腦上執行,不經任何雲端服務</span>
+    <span class="subtitle">語音辨識(SenseVoice)、查詢比對、語音合成(Piper)全部在這台電腦上執行,不經任何雲端服務</span>
   </header>
 
   <div class="settings-bar">
@@ -457,7 +457,7 @@
           if (recordingError) return;
           const blob = new Blob(chunks, { type: mimeType });
           if (!blob.size) throw new Error('沒有錄到聲音,請重新錄製。');
-          setInputStatus('正在辨識語音(本機Whisper)…');
+          setInputStatus('正在辨識語音(本機SenseVoice)…');
           const response = await fetch('/audio/transcribe', {
             method: 'POST', headers: { 'Content-Type': mimeType }, body: blob,
             signal: AbortSignal.timeout(90000),

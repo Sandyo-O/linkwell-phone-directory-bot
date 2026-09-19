@@ -2,9 +2,45 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
+const readline = require('readline');
 const QRCode = require('qrcode');
-const { loadWhisperModel, loadAudioAsFloat32, synthesize, toSpokenText, s2t } = require('./core');
+const { convertToWavFile, transcribeSenseVoice, synthesize, toSpokenText, s2t } = require('./core');
 const { lookup } = require('./lookup');
+
+// SenseVoice needs Python (funasr) - runs as a persistent sidecar process so
+// the model only loads once, not per request. See sensevoice_server.py for
+// why: it's ~15x faster than the Whisper model this replaced, at the same
+// accuracy on real employee names (tested side-by-side before switching).
+const PYTHON_EXE = (() => {
+  const wingetDefault = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Python', 'Python311', 'python.exe');
+  return fs.existsSync(wingetDefault) ? wingetDefault : 'python';
+})();
+
+function startSenseVoiceSidecar() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON_EXE, ['-u', path.join(__dirname, 'sensevoice_server.py')], {
+      cwd: __dirname,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    });
+    let settled = false;
+    readline.createInterface({ input: proc.stdout }).on('line', (line) => {
+      console.log(`[sensevoice] ${line}`);
+      if (!settled && line.includes('[ready]')) {
+        settled = true;
+        resolve(proc);
+      }
+    });
+    readline.createInterface({ input: proc.stderr }).on('line', (line) => console.error(`[sensevoice] ${line}`));
+    proc.on('exit', (code) => {
+      console.error(`[sensevoice] 行程意外結束 (code ${code})`);
+      if (!settled) {
+        settled = true;
+        reject(new Error('SenseVoice服務啟動失敗'));
+      }
+    });
+  });
+}
 
 // Dify's own lookup only does exact substring matching on the name - it
 // doesn't have the pinyin fuzzy-matching data/logic this project already
@@ -138,8 +174,8 @@ function sendJson(res, statusCode, obj) {
 }
 
 async function main() {
-  console.log('載入本機Whisper模型(第一次啟動可能要等一下)...');
-  const transcriber = await loadWhisperModel();
+  console.log('啟動SenseVoice語音辨識服務(第一次啟動要下載模型,可能要等一下)...');
+  await startSenseVoiceSidecar();
   console.log('模型載入完成,啟動伺服器...');
 
   const server = http.createServer(async (req, res) => {
@@ -165,15 +201,16 @@ async function main() {
           return;
         }
         const inputPath = path.join(os.tmpdir(), `voice-in-${Date.now()}.${extension}`);
+        const wavPath = `${inputPath}.sensevoice.wav`;
         try {
           const t0 = Date.now();
           fs.writeFileSync(inputPath, data);
-          const audio = await loadAudioAsFloat32(inputPath);
+          convertToWavFile(inputPath, wavPath);
           const t1 = Date.now();
-          const sttResult = await transcriber(audio, { language: 'chinese', task: 'transcribe' });
+          const rawText = await transcribeSenseVoice(wavPath);
           const t2 = Date.now();
-          const text = s2t(sttResult.text.trim());
-          console.log(`[timing] transcribe: ffmpeg=${t1 - t0}ms whisper=${t2 - t1}ms total=${t2 - t0}ms audioBytes=${data.length}`);
+          const text = s2t(rawText.trim());
+          console.log(`[timing] transcribe: ffmpeg=${t1 - t0}ms sensevoice=${t2 - t1}ms total=${t2 - t0}ms audioBytes=${data.length}`);
           if (!text) {
             sendJson(res, 422, { detail: '未辨識到語音,請靠近麥克風重新錄製。' });
             return;
@@ -184,6 +221,7 @@ async function main() {
           sendJson(res, 502, { detail: '語音辨識失敗,請稍後再試。' });
         } finally {
           fs.rmSync(inputPath, { force: true });
+          fs.rmSync(wavPath, { force: true });
         }
         return;
       }
