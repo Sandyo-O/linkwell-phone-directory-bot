@@ -64,8 +64,9 @@
   .bubble.error { border-color: #f87171; color: #fca5a5; }
   .bubble .mailto-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
   .bubble .mailto-btn {
-    display: inline-block; padding: 8px 12px; border-radius: 10px;
+    display: inline-block; padding: 8px 12px; border-radius: 10px; border: none;
     background: var(--accent-cyan); color: #04121f; text-decoration: none; font-size: 12px; font-weight: 600;
+    font-family: inherit; cursor: pointer;
   }
   .input-bar { display: flex; gap: 8px; margin-top: 12px; }
   .input-bar input {
@@ -331,9 +332,13 @@
   let transcriber = null;
   let modelReady = false;
 
+  // whisper-tiny instead of whisper-base: smaller download (~40MB vs
+  // ~140MB+), much more likely to actually finish on a phone's network/
+  // storage limits. Trades a bit of accuracy, but the fuzzy pinyin matcher
+  // in lookup() already exists specifically to cover for that.
   async function loadModel() {
     try {
-      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
         progress_callback: (p) => {
           if (p.status === 'progress' && p.file) {
             modelStatus.textContent = `正在下載語音辨識模型... ${p.file} ${Math.round(p.progress || 0)}%`;
@@ -346,7 +351,17 @@
       updateControls();
     } catch (e) {
       console.error(e);
-      modelStatus.textContent = '語音辨識模型載入失敗,仍可用打字查詢。';
+      modelStatus.innerHTML = '';
+      modelStatus.append(`語音辨識模型載入失敗(${e.message || e}),仍可用打字查詢。`, document.createElement('br'));
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.textContent = '重試';
+      retryBtn.style.cssText = 'margin-top:8px;padding:6px 14px;border-radius:10px;border:1px solid var(--border-glow);background:var(--bg-panel-2);color:var(--text-main);cursor:pointer;';
+      retryBtn.addEventListener('click', () => {
+        modelStatus.textContent = '正在載入語音辨識模型...';
+        loadModel();
+      });
+      modelStatus.appendChild(retryBtn);
     }
   }
 
@@ -477,6 +492,25 @@
         link.textContent = label;
         row2.appendChild(link);
       }
+      // Fallback for phones: tapping a mail link sometimes hands off to the
+      // native Gmail/Outlook app, which doesn't always honor the prefilled
+      // subject/body the web compose URL carries - let people copy the
+      // result text themselves and paste it in whatever opened.
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'mailto-btn';
+      copyBtn.textContent = '📋 複製查詢結果';
+      copyBtn.addEventListener('click', async () => {
+        const plain = `您好,您查詢的同仁 ${options.mailResult.name} 分機為:${options.mailResult.ext}\n部門:${options.mailResult.dept || '未標示'}\n地區:${options.mailResult.loc || '未標示'}`;
+        try {
+          await navigator.clipboard.writeText(plain);
+          copyBtn.textContent = '✅ 已複製';
+        } catch (e) {
+          copyBtn.textContent = '複製失敗,請手動選取文字';
+        }
+        setTimeout(() => { copyBtn.textContent = '📋 複製查詢結果'; }, 2000);
+      });
+      row2.appendChild(copyBtn);
       bubble.appendChild(document.createElement('br'));
       bubble.appendChild(row2);
     }
