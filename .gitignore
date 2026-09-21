@@ -14,3 +14,4 @@ voice/last-received.webm
 # API金鑰等機密設定,不可進版控
 voice/.env
 voice/.env.txt
+n8n-voice/.env

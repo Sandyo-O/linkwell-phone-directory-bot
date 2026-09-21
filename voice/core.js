@@ -65,9 +65,11 @@ function convertToWavFile(inputPath, outWavPath) {
   execSync(`ffmpeg -y -i "${inputPath}" -ar 16000 -ac 1 "${outWavPath}"`, { stdio: 'pipe' });
 }
 
-const SENSEVOICE_URL = 'http://127.0.0.1:8765/transcribe';
+// Configurable so a second server instance (e.g. n8n-voice/server.js) can run
+// its own sidecar on a different port without colliding with this one.
+const SENSEVOICE_PORT = process.env.SENSEVOICE_PORT || '8765';
 async function transcribeSenseVoice(wavPath) {
-  const response = await fetch(SENSEVOICE_URL, {
+  const response = await fetch(`http://127.0.0.1:${SENSEVOICE_PORT}/transcribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ wav_path: path.resolve(wavPath) }),

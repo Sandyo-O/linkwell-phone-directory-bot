@@ -12,13 +12,14 @@ test that verified this model's accuracy/speed.
 """
 
 import json
+import os
 import re
 import sys
 import time
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PORT = 8765
+PORT = int(os.environ.get("SENSEVOICE_PORT", "8765"))
 TAG_PATTERN = re.compile(r"<\|[^|]*\|>")
 
 print("Loading SenseVoice-small model...", flush=True)
