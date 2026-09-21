@@ -129,8 +129,15 @@ async function askDify(message, browserConversationId, defaultEmail) {
 
 const PORT = 3939;
 const HOST = '0.0.0.0'; // bind all interfaces - approved for use over the office LAN (QR-code kiosk access)
-const LAN_IP = findLanIp();
-const LAN_URL = LAN_IP ? `http://${LAN_IP}:${PORT}` : null;
+
+// Re-detect on every call rather than caching once at startup - laptops
+// change networks (different Wi-Fi, hotspot on/off) far more often than this
+// server gets restarted, and a stale cached IP just silently serves a QR
+// code/URL that no longer points at this machine.
+function currentLanUrl() {
+  const ip = findLanIp();
+  return ip ? `http://${ip}:${PORT}` : null;
+}
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
@@ -310,18 +317,19 @@ async function main() {
       }
 
       if (req.method === 'GET' && req.url === '/lan-url') {
-        sendJson(res, 200, { url: LAN_URL });
+        sendJson(res, 200, { url: currentLanUrl() });
         return;
       }
 
       if (req.method === 'GET' && req.url.split('?')[0] === '/qrcode.png') {
-        if (!LAN_URL) {
+        const lanUrl = currentLanUrl();
+        if (!lanUrl) {
           res.writeHead(404);
           res.end('找不到區網IP');
           return;
         }
         try {
-          const pngBuf = await QRCode.toBuffer(LAN_URL, { width: 320, margin: 2 });
+          const pngBuf = await QRCode.toBuffer(lanUrl, { width: 320, margin: 2 });
           res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
           res.end(pngBuf);
         } catch (e) {
@@ -351,8 +359,9 @@ async function main() {
   });
 
   server.listen(PORT, HOST, () => {
+    const lanUrl = currentLanUrl();
     console.log(`\n打開瀏覽器到 http://localhost:${PORT} 開始測試`);
-    console.log(LAN_URL ? `區網其他裝置可連到 ${LAN_URL}(或掃描頁面上的QR code)\n` : '找不到區網IP,其他裝置可能無法連線\n');
+    console.log(lanUrl ? `區網其他裝置可連到 ${lanUrl}(或掃描頁面上的QR code,換網路後重新點一次會自動更新)\n` : '找不到區網IP,其他裝置可能無法連線\n');
   });
 }
 
