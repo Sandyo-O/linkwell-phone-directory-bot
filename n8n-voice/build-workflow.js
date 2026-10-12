@@ -65,12 +65,14 @@ function splitLoc(loc) {
   return [loc || '', ''];
 }
 
-function buildFoundAnswer(r) {
+function buildFoundAnswer(r, depts) {
+  // several titles for one person: one department per line, easier to read
+  const deptText = depts && depts.length > 1 ? ('\\n' + depts.join('\\n')) : (r.dept || '未標示');
   const parts = splitLoc(r.loc);
   const city = parts[0];
   const building = parts[1];
   const buildingLine = building ? ('地點:' + building + '\\n') : '';
-  return '以下是「' + r.name + '」的員工資訊:\\n\\n姓名:' + r.name + '\\n分機:' + r.ext + '\\n地區:' + city + '\\n' + buildingLine + '部門:' + (r.dept || '未標示') + '\\n\\n請問要把這個分機寄到您的email嗎?要的話請回覆「要」或直接輸入您的email地址,不用的話請回覆「不用」。';
+  return '以下是「' + r.name + '」的員工資訊:\\n\\n姓名:' + r.name + '\\n分機:' + r.ext + '\\n地區:' + city + '\\n' + buildingLine + '部門:' + deptText + '\\n\\n請問要把這個分機寄到您的email嗎?要的話請回覆「要」或直接輸入您的email地址,不用的話請回覆「不用」。';
 }
 
 const DECLINE_WORDS = ['不用', '不寄', '不需要', '算了', '不要', '取消', 'no', '不用了'];
@@ -115,7 +117,7 @@ if (stage === 'await_email') {
     const depts = Array.from(new Set(r.rows.map((m) => m.dept).filter(Boolean)));
     const locs = Array.from(new Set(r.rows.map((m) => m.loc)));
     const merged = { name: r.name, ext: r.ext, dept: depts.join('、'), loc: locs.join('、') };
-    result = { sendEmail: 'false', reply: buildFoundAnswer(merged), stage: 'await_email', pending: merged };
+    result = { sendEmail: 'false', reply: buildFoundAnswer(merged, depts), stage: 'await_email', pending: merged };
   } else if (r.status === 'multiple') {
     const reply = r.sameName
       ? ('查到' + r.count + '位同名同姓的' + r.name + ',分機不同,分屬不同部門:\\n' + r.summary + '\\n請說出或輸入部門/地區名稱來確認是哪一位。')
