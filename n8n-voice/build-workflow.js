@@ -27,13 +27,16 @@ const DATA = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'voice', 'dir
 const mainLogicCode = `const DATA = ${JSON.stringify(DATA)};
 
 function lookup(query) {
-  const q = (query || '').trim();
+  // 臺/台 are the same word in this data (and speech recognition emits 臺) - compare on one form
+  const norm = (t) => (t || '').replace(/臺/g, '台');
+  const q = norm((query || '').trim());
   const qNoSpace = q.replace(/ /g, '').replace(/\\u3000/g, '');
   const seen = new Set();
   let matches = [];
   for (const r of DATA) {
     const nm = r.name;
-    if (nm && (q.includes(nm) || qNoSpace.includes(nm))) {
+    const nmN = norm(nm);
+    if (nm && (q.includes(nmN) || qNoSpace.includes(nmN))) {
       const key = r.loc + '|' + r.dept + '|' + nm + '|' + r.ext;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -41,8 +44,9 @@ function lookup(query) {
     }
   }
   if (matches.length > 1) {
-    const narrowed = matches.filter((r) => (r.dept && qNoSpace.includes(r.dept)) || (r.loc && qNoSpace.includes(r.loc)));
-    if (narrowed.length === 1) matches = narrowed;
+    const cityOf = (loc) => norm(loc).split('(')[0];
+    const narrowed = matches.filter((r) => (r.dept && qNoSpace.includes(norm(r.dept))) || (r.loc && (qNoSpace.includes(norm(r.loc)) || qNoSpace.includes(cityOf(r.loc)))));
+    if (narrowed.length >= 1) matches = narrowed;
   }
   let status;
   if (matches.length === 0) status = 'none';
