@@ -10,7 +10,7 @@
 | 查詢/決策邏輯寫在哪 | Python code node,跑在有網路隔離的sandbox容器裡 | 一般JavaScript code node,沒有Dify sandbox那種網路隔離限制 |
 | 對話狀態(問到哪一步了) | Dify自己用conversation_variables記住 | n8n工作流程本身無狀態,由 `n8n-voice/server.js` 記住每個瀏覽器分頁的{stage, pending},每次呼叫都整包傳給n8n |
 | 更新流程邏輯後怎麼套用 | 舊版必須整個app刪除重新Import DSL(會清掉環境變數、API金鑰要重拿) | 直接用 `node import-workflow.js` 透過API更新同一個workflow,不會弄丟任何設定,也不用重新拿API金鑰 |
-| 寄信 | Resend HTTP API | 一樣是Resend HTTP API(可以換成SendGrid或公司內部SMTP,因為n8n沒有sandbox網路隔離限制,理論上比Dify更容易接公司內部SMTP) |
+| 寄信 | Resend HTTP API(免費方案只能寄給帳號本人) | Gmail SMTP(用您自己的Gmail+應用程式密碼,可寄給任何人,每天上限約500封);也可以改接公司內部SMTP |
 
 語音辨識、語音合成的架構、限制、地端與否,都跟Dify版完全一樣(同一份程式碼),請參考 `voice/README.md`。
 
@@ -26,7 +26,7 @@ n8n-voice/server.js (port 3940,跟Dify版的3939不同,可以同時開兩個測�
        ↓
      n8n (Docker容器,port 5679)
        └─ workflow: Webhook → Main Logic(查詢+分類決策)→ 要寄信嗎?
-            ├─ 要 → 呼叫 Resend API → 組回覆
+            ├─ 要 → 透過 Gmail SMTP 寄信 → 組回覆
             └─ 不用 → 直接回覆
 ```
 
@@ -39,15 +39,21 @@ docker run -d --name n8n-voice -p 5679:5678 \
   -v n8n_voice_data:/home/node/.n8n \
   -e N8N_SECURE_COOKIE=false \
   -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
-  -e RESEND_API_KEY="你的Resend API Key" \
   n8nio/n8n
 ```
 
-`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` **一定要加**,不然workflow裡讀不到 `RESEND_API_KEY` 這個環境變數,寄信那步會直接報錯(`access to env vars denied`)。
 
 打開 `http://localhost:5679`,第一次會要求設定一個本機管理帳號(存在n8n自己的資料庫裡,不是第三方服務,不用擔心)。
 
-### 2. 建立API Key並匯入workflow
+### 2. 建立寄信用的SMTP認證、API Key,並匯入workflow
+
+寄信用Gmail SMTP:到 https://myaccount.google.com/apppasswords(需先開啟兩步驟驗證)建立一組16碼「應用程式密碼」,然後在n8n建立一筆類型為 SMTP 的認證(host=smtp.gmail.com、port=465、SSL開啟、user=您的Gmail、password=應用程式密碼)——可以用n8n畫面(Credentials)或API(POST /api/v1/credentials)建立,**密碼只存在n8n自己的加密資料庫裡,不要寫進repo**。把該認證的id與寄件信箱存進 .env:
+
+```
+N8N_SMTP_CREDENTIAL_ID=認證id
+N8N_SMTP_FROM=您的Gmail
+```
+
 
 1. n8n畫面裡:Settings → n8n API → Create API key,複製金鑰
 2. 建立/編輯 `n8n-voice/.env`:
@@ -88,4 +94,4 @@ node import-workflow.js
 
 ## 重要取捨
 
-跟Dify版完全一樣(同一份Resend、同一份SenseVoice/Piper),請參考 `voice/README.md` 和 `使用說明.md`。n8n本身沒有引入新的資安/隱私取捨,純粹是換一個自架平台。
+語音辨識/合成跟Dify版完全一樣(同一份SenseVoice/Piper);寄信改走Gmail SMTP(資料會經過Google伺服器,一樣不是全地端),請參考 `voice/README.md` 和 `使用說明.md`。n8n本身沒有引入新的資安/隱私取捨,純粹是換一個自架平台。

@@ -13,6 +13,15 @@
 const fs = require('fs');
 const path = require('path');
 
+const envPath = path.join(__dirname, '.env');
+for (const line of fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8').split('\n') : []) {
+  const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+  if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+}
+const SMTP_CREDENTIAL_ID = process.env.N8N_SMTP_CREDENTIAL_ID;
+const SMTP_FROM = process.env.N8N_SMTP_FROM;
+if (!SMTP_CREDENTIAL_ID || !SMTP_FROM) throw new Error('n8n-voice/.env 需要 N8N_SMTP_CREDENTIAL_ID 和 N8N_SMTP_FROM');
+
 const DATA = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'voice', 'directory.json'), 'utf8'));
 
 const mainLogicCode = `const DATA = ${JSON.stringify(DATA)};
@@ -105,17 +114,7 @@ if (stage === 'await_email') {
 return [{ json: Object.assign({}, result, { pendingForEmail: pending }) }];
 `;
 
-const finalizeCode = `const httpResult = $input.first().json;
-const original = $('Main Logic').first().json;
-const p = original.pendingForEmail || {};
-let reply;
-if (httpResult.statusCode === 200) {
-  reply = '好的,已經把「' + p.name + '」的分機(' + p.ext + ')寄到 ' + original.emailTo + ' 囉!\\n\\n還想查其他同仁的分機嗎?直接輸入姓名即可。';
-} else {
-  reply = '抱歉,信件寄送失敗了(狀態碼:' + httpResult.statusCode + ')。常見原因是Resend API Key沒設定或設錯、或收件信箱不是你註冊Resend時用的信箱(免費方案的限制)。\\n\\n還想再查其他同仁的分機嗎?直接輸入姓名即可。';
-}
-return [{ json: { reply, stage: '', pending: {} } }];
-`;
+const finalizeCode = `const sendResult = $input.first().json;\nconst original = $('Main Logic').first().json;\nconst p = original.pendingForEmail || {};\nlet reply;\nif (!sendResult.error) {\n  reply = '好的,已經把「' + p.name + '」的分機(' + p.ext + ')寄到 ' + original.emailTo + ' 囉!\\n\\n還想查其他同仁的分機嗎?直接輸入姓名即可。';\n} else {\n  const detail = typeof sendResult.error === 'string' ? sendResult.error : (sendResult.error.message || '未知錯誤');\n  reply = '抱歉,信件寄送失敗了(' + detail + ')。常見原因是Gmail應用程式密碼失效或設錯,請檢查n8n裡的「Gmail SMTP」認證。\\n\\n還想再查其他同仁的分機嗎?直接輸入姓名即可。';\n}\nreturn [{ json: { reply, stage: '', pending: {} } }];\n`;
 
 const workflow = {
   name: '分機查詢小幫手(n8n版)',
@@ -159,26 +158,20 @@ const workflow = {
       },
     },
     {
-      id: 'resend1',
-      name: 'Send via Resend',
-      type: 'n8n-nodes-base.httpRequest',
-      typeVersion: 4.2,
+      id: 'sendmail1',
+      name: 'Send Email (Gmail SMTP)',
+      type: 'n8n-nodes-base.emailSend',
+      typeVersion: 2.1,
       position: [780, -100],
+      onError: 'continueRegularOutput',
+      credentials: { smtp: { id: SMTP_CREDENTIAL_ID, name: 'Gmail SMTP' } },
       parameters: {
-        method: 'POST',
-        url: 'https://api.resend.com/emails',
-        sendHeaders: true,
-        headerParameters: {
-          parameters: [
-            { name: 'Authorization', value: '=Bearer {{ $env.RESEND_API_KEY }}' },
-            { name: 'Content-Type', value: 'application/json' },
-          ],
-        },
-        sendBody: true,
-        specifyBody: 'json',
-        jsonBody:
-          '={{ JSON.stringify({ from: "onboarding@resend.dev", to: [$json.emailTo], subject: "凌群電腦分機查詢結果", html: "<p>您好,您查詢的同仁 <b>" + $json.pendingForEmail.name + "</b> 分機為:<b>" + $json.pendingForEmail.ext + "</b></p><p>部門:" + ($json.pendingForEmail.dept || "未標示") + "</p><p>地區:" + ($json.pendingForEmail.loc || "未標示") + "</p>" }) }}',
-        options: { response: { response: { fullResponse: true, neverError: true } } },
+        fromEmail: SMTP_FROM,
+        toEmail: '={{ $json.emailTo }}',
+        subject: '凌群電腦分機查詢結果',
+        emailFormat: 'html',
+        html: '={{ "<p>您好,您查詢的同仁 <b>" + $json.pendingForEmail.name + "</b> 分機為:<b>" + $json.pendingForEmail.ext + "</b></p><p>部門:" + ($json.pendingForEmail.dept || "未標示") + "</p><p>地區:" + ($json.pendingForEmail.loc || "未標示") + "</p>" }}',
+        options: {},
       },
     },
     {
@@ -211,11 +204,11 @@ const workflow = {
     'Main Logic': { main: [[{ node: 'Should Send Email', type: 'main', index: 0 }]] },
     'Should Send Email': {
       main: [
-        [{ node: 'Send via Resend', type: 'main', index: 0 }],
+        [{ node: 'Send Email (Gmail SMTP)', type: 'main', index: 0 }],
         [{ node: 'Respond No Email', type: 'main', index: 0 }],
       ],
     },
-    'Send via Resend': { main: [[{ node: 'Finalize After Send', type: 'main', index: 0 }]] },
+    'Send Email (Gmail SMTP)': { main: [[{ node: 'Finalize After Send', type: 'main', index: 0 }]] },
     'Finalize After Send': { main: [[{ node: 'Respond After Send', type: 'main', index: 0 }]] },
   },
   settings: {},
