@@ -52,7 +52,7 @@ function lookup(query) {
   const sameName = new Set(matches.map((m) => m.name)).size <= 1;
   const summaryLines = matches.slice(0, 10).map((m, i) => (i + 1) + '. ' + m.name + ' - 部門:' + (m.dept || '未標示部門') + ' / 地區:' + (m.loc || '未標示地區') + ' / 分機:' + m.ext);
   if (matches.length > 10) summaryLines.push('...還有 ' + (matches.length - 10) + ' 筆未列出,請輸入更精確的姓名或部門縮小範圍');
-  return { status, sameName, name: first.name, ext: first.ext, dept: first.dept, loc: first.loc, summary: summaryLines.join('\\n'), count: matches.length };
+  return { status, sameName, name: first.name, ext: first.ext, dept: first.dept, loc: first.loc, summary: summaryLines.join('\\n'), count: matches.length, rows: matches };
 }
 
 function splitLoc(loc) {
@@ -98,14 +98,25 @@ if (stage === 'await_email') {
     result = { sendEmail: 'false', reply: '不好意思,沒有聽懂。要寄的話請輸入您的email地址(例如:name@example.com),不寄的話請回覆「不用」。', stage: 'await_email', pending };
   }
 } else {
-  const r = lookup(message);
-  if (r.status === 'single') {
-    result = { sendEmail: 'false', reply: buildFoundAnswer(r), stage: 'await_email', pending: { name: r.name, ext: r.ext, dept: r.dept, loc: r.loc } };
+  let r = lookup(message);
+  // Follow-up to a "which department?" list: the person typed only a
+  // department/location, no name, so retry with the name we asked about.
+  if (r.status === 'none' && stage === 'await_disambig' && pending.name) {
+    r = lookup(pending.name + message);
+  }
+  // Same name AND same extension on every row is one person holding
+  // several titles, not a real ambiguity - merge instead of asking.
+  const onePerson = r.status === 'multiple' && r.sameName && new Set(r.rows.map((m) => m.ext)).size === 1;
+  if (r.status === 'single' || onePerson) {
+    const depts = Array.from(new Set(r.rows.map((m) => m.dept).filter(Boolean)));
+    const locs = Array.from(new Set(r.rows.map((m) => m.loc)));
+    const merged = { name: r.name, ext: r.ext, dept: depts.join('、'), loc: locs.join('、') };
+    result = { sendEmail: 'false', reply: buildFoundAnswer(merged), stage: 'await_email', pending: merged };
   } else if (r.status === 'multiple') {
     const reply = r.sameName
-      ? ('查到' + r.count + '位同名同姓的' + r.name + ',分屬不同部門:\\n' + r.summary + '\\n請說出或輸入部門/地區名稱來確認是哪一位。')
+      ? ('查到' + r.count + '位同名同姓的' + r.name + ',分機不同,分屬不同部門:\\n' + r.summary + '\\n請說出或輸入部門/地區名稱來確認是哪一位。')
       : ('找到' + r.count + '筆符合的同仁:\\n' + r.summary + '\\n請輸入更完整的姓名。');
-    result = { sendEmail: 'false', reply, stage: '', pending: {} };
+    result = { sendEmail: 'false', reply, stage: r.sameName ? 'await_disambig' : '', pending: r.sameName ? { name: r.name } : {} };
   } else {
     result = { sendEmail: 'false', reply: '抱歉,查無此人,請確認姓名是否正確。', stage: '', pending: {} };
   }
